@@ -51,19 +51,45 @@ In Zero Trust, add a self-hosted application for `paper-trading.<subdomain>.work
 (`https://<team>.cloudflareaccess.com`) and `ACCESS_AUD` (the application's AUD tag) in `wrangler.jsonc`
 and deploy. The Worker verifies the Access JWT on every `/admin` request.
 
-## 5. Home machine
+## 5. Home machine: the iMac (always on)
+
+The live stack runs natively on macOS. Colima's VM there drops most outbound connections, so only QuestDB
+runs in Colima. Everything lives in `~/lle-live` on the internal disk. launchd agents can't read the
+external drive without a privacy permission, and an attempt to run from it failed with exit 78.
+
+Build on the iMac, using Apple clang and Homebrew's `openssl@3`; nothing else needs installing:
 
 ```bash
-crypto_engine --venue bitstamp --exchange 127.0.0.1:31012 --control /dev/shm/lle-control --cpu <hot core>
+git archive HEAD engine | ssh imac-ts 'mkdir -p ~/lle-live/src && tar -x -C ~/lle-live/src'
 ```
 
 ```bash
-paper_exchange --source bitstamp --orders 127.0.0.1:31012 --cpu <other core>
+ssh imac-ts 'cd ~/lle-live/src && O=/opt/homebrew/opt/openssl@3 && for t in crypto_engine paper_exchange recorder; do clang++ -std=c++20 -O3 -mcpu=apple-m1 -DNDEBUG -I engine/include -I $O/include engine/src/${t}_main.cpp -L $O/lib -lssl -lcrypto -o ../bin/$t; done'
 ```
 
+Cross-compile telemetry on the laptop (`CGO_ENABLED=0 GOOS=darwin GOARCH=arm64 go build`) and copy it,
+`tools/live.sh`, the plist template and `install.sh` with `ssh imac-ts 'cat > file' < file` (`scp` is
+disabled on the iMac). Put the ingest secret in `~/lle-live/secrets/ingest` with mode 600, then:
+
 ```bash
-telemetry --ring /dev/shm/lle-telemetry-crypto --control /dev/shm/lle-control --uplink wss://paper-trading.<subdomain>.workers.dev/ingest --uplink-secret-file ~/.config/lle/ingest
+ssh imac-ts 'bash ~/lle-live/install.sh ~/lle-live'
 ```
+
+The agent (`com.lle.live`) starts at login and restarts the stack if it exits. Each process is also
+restarted by `live.sh`. Logs go to `~/lle-live/logs`. To stop it:
+
+```bash
+ssh imac-ts 'launchctl bootout gui/$(id -u)/com.lle.live'
+```
+
+QuestDB (local only):
+
+```bash
+ssh imac-ts 'cd ~/1tb-drive/lle && docker-compose -p lle -f compose.imac.yml up -d'
+```
+
+Only one telemetry uplink may run at a time: the hub keeps the newest connection, so two hosts would keep
+replacing each other.
 
 Telemetry refuses `--venue coinbase` together with `--uplink`, because Coinbase's terms don't allow
 showing its data publicly.

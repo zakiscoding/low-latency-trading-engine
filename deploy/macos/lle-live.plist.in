@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- launchd agent for the public demo stack on the iMac (native macOS, not Colima:
+     Colima's VM networking drops most outbound connections there).
+     Installed by deploy/macos/install.sh, which fills in __LLE__. -->
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>com.lle.live</string>
+  <key>ProgramArguments</key>
+  <array><string>/bin/bash</string><string>__LLE__/bin/live.sh</string></array>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>B</key><string>__LLE__/bin</string>
+    <key>TELEMETRY</key><string>__LLE__/bin/telemetry</string>
+    <key>SHM_DIR</key><string>/tmp/lle</string>
+    <key>LOG_DIR</key><string>__LLE__/logs</string>
+    <key>UPLINK</key><string>wss://paper-trading.vllm-gateway.workers.dev/ingest</string>
+    <key>SECRET_FILE</key><string>__LLE__/secrets/ingest</string>
+    <key>IDLE_WAIT_MS</key><string>1</string>
+    <key>HZ</key><string>10</string>
+    <key>RECORD_VENUE</key><string>coinbase</string>
+    <key>QUESTDB</key><string>127.0.0.1:9009</string>
+    <key>TELEMETRY_LISTEN</key><string>127.0.0.1:18090</string>
+    <key>NOTE</key><string>Always-on host: Apple M1 iMac, native macOS, engine in low-CPU mode (sleeps in poll() when idle; no kernel RX timestamps on macOS). Not a benchmark setup.</string>
+  </dict>
+  <key>RunAtLoad</key><true/>
+  <key>KeepAlive</key><true/>
+  <key>ThrottleInterval</key><integer>10</integer>
+  <key>ProcessType</key><string>Background</string>
+  <key>StandardOutPath</key><string>__LLE__/logs/live.out</string>
+  <key>StandardErrorPath</key><string>__LLE__/logs/live.err</string>
+</dict>
+</plist>

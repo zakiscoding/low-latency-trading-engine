@@ -70,6 +70,23 @@ flowchart LR
 - **Public trading never touches the benchmark engine.** Each signed-in user's paper account is a separate
   Durable Object. It reads the public book from the hub and uses the same fill rules as the C++ simulator.
 
+## Where it runs
+
+| Piece | Host | How |
+|---|---|---|
+| Public site, edge cache, paper accounts, leaderboard | Cloudflare | Worker `paper-trading` on `workers.dev`, Durable Objects |
+| Live engine (Bitstamp), paper exchange, telemetry uplink | iMac (Apple M1), native macOS | launchd agent ([deploy/macos](deploy/macos)), low-CPU mode, about 2% CPU per process |
+| Coinbase recorder | iMac, native macOS | Same launchd agent; private only |
+| Tick store (QuestDB) | iMac, Colima | [deploy/compose.imac.yml](deploy/compose.imac.yml); localhost only |
+| Benchmarks: replay, OS and network ladder | GPU PC (i7-14700F), Ubuntu boot | Planned; the laptop numbers below are the "before" |
+| Build, test, deploy | Laptop | Docker image [tools/dev.Dockerfile](tools/dev.Dockerfile); runs no services |
+
+Why native macOS and not containers on the iMac: inside its Colima VM, outbound TCP connections to
+Bitstamp and Cloudflare succeeded 0–1 times in 5 (November 14, 2026), even with host networking, while
+the iMac itself connected 5 of 5. The engine builds for arm64 and macOS from the same source. On macOS
+the Linux-only parts drop out: kernel RX timestamps, CPU pinning, busy polling and io_uring. That's why
+the live latency on the site is labelled as a non-benchmark setup.
+
 ## Latency results
 
 ### Code-level (ladder step 1), in-process
@@ -123,6 +140,14 @@ Reproduce with `tools/dbuild.sh` (see [Running it](#running-it)). Raw JSON is in
 **These laptop numbers don't measure the engine.** Even at 10k packets/s, the time from the kernel
 stamping a packet to user space seeing it is tens of µs to ms inside the Hyper-V VM. A UDP `send()` on
 loopback costs about 5 µs there. I'm including them as the "before" for steps 2 and 3, not as results.
+
+### L2 book replacement (found on the iMac)
+
+Bitstamp sends a top-100 snapshot about 10 times a second, and since the resync fix each one replaces the
+book. `clear()` used to memset the whole 2^18-level window: about 4 MB of stores per side, per snapshot.
+Walking the occupied-level bitmap instead cut the live engine's parse+apply p50 from **437 µs to 93 µs**,
+and in-process tick-to-trade to 161 µs p50. This was measured on the iMac M1 in low-CPU mode over about
+25 s of live data. The absolute values include waking from `poll()` with cold caches.
 
 ### Live feed (Bitstamp / Coinbase, laptop)
 
@@ -204,7 +229,9 @@ Bugs the tests and live runs caught:
 
 - No FPGA, no colocation, no kernel-bypass NIC (Solarflare/ef_vi, DPDK). The fastest receive path here is
   a busy-polled socket or io_uring.
-- Every number so far comes from a 2P+4E laptop inside a VM. Clean numbers need the tuned Ubuntu box.
+- Every benchmark number so far comes from a 2P+4E laptop inside a VM. Clean numbers need the tuned Ubuntu box.
+- The always-on live demo runs on a shared iMac in low-CPU mode (it sleeps in `poll()` when idle). Its latency
+  histogram shows that setup, not the engine's best case.
 - The demo strategy is a toy and is **not expected to be profitable**. Its live paper P&L is negative,
   mostly from fees.
 - ITCH order books cover a fixed $327 window per symbol at one-cent ticks. Orders outside it are counted
