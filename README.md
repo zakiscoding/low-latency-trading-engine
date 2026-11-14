@@ -165,8 +165,9 @@ driver with native XDP. The tails are the VM's and not comparable between runs. 
 
 `iex_replay` over a seeded synthetic DEEP capture (2M price-level messages, 8 symbols, 418k segments)
 measured parse plus L2 update at **36 ns p50 per message**, 92 ns p99 and 169 ns p50 per segment
-([iex_synth_deep.json](results/laptop/iex_synth_deep.json)). A real IEX HIST day hasn't been run yet,
-because the download needs the owner's OK under IEX's terms.
+([iex_synth_deep.json](results/laptop/iex_synth_deep.json)). A real IEX day hasn't been run: as of
+November 14, 2026, IEX's market-data page says historical PCAP data "is not currently available for
+direct download" and points to its market operations team.
 
 ### L2 book replacement (found on the iMac)
 
