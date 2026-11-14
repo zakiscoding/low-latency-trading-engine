@@ -73,10 +73,14 @@ inline void print_stages(const StageHists& s, const TscClock& clk, FILE* f = std
 // Pins the calling thread. Returns false (and keeps going) if the CPU isn't allowed.
 inline bool pin_to_cpu(int cpu) {
   if (cpu < 0) return false;
+#if defined(__linux__)
   cpu_set_t set;
   CPU_ZERO(&set);
   CPU_SET(cpu, &set);
   return pthread_setaffinity_np(pthread_self(), sizeof(set), &set) == 0;
+#else
+  return false;  // macOS has no hard CPU affinity
+#endif
 }
 
 // Locks current and future pages so the hot path never takes a major page fault.

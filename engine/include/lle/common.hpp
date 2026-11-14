@@ -4,12 +4,18 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
+#include <sys/socket.h>
 
 #define LLE_LIKELY(x) __builtin_expect(!!(x), 1)
 #define LLE_UNLIKELY(x) __builtin_expect(!!(x), 0)
 #define LLE_ALWAYS_INLINE inline __attribute__((always_inline))
 #define LLE_NOINLINE __attribute__((noinline))
 #define LLE_COLD __attribute__((cold, noinline))
+
+// macOS has no MSG_NOSIGNAL; sockets there set SO_NOSIGPIPE instead.
+#if !defined(MSG_NOSIGNAL)
+#define MSG_NOSIGNAL 0
+#endif
 
 namespace lle {
 

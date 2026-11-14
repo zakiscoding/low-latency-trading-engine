@@ -143,7 +143,7 @@ inline void mask_frame(std::vector<unsigned char>& out, Opcode op, std::string_v
 class Client {
  public:
   Client() {
-    plain_cap_ = 96u << 20;
+    plain_cap_ = 16u << 20;  // largest message seen: Coinbase's ~4 MB L2 snapshot
     plain_ = static_cast<unsigned char*>(table_alloc(plain_cap_));
   }
   ~Client() {
@@ -170,6 +170,9 @@ class Client {
     freeaddrinfo(res);
     int one = 1;
     ::setsockopt(fd_, IPPROTO_TCP, TCP_NODELAY, &one, sizeof(one));
+#if defined(SO_NOSIGPIPE)
+    ::setsockopt(fd_, SOL_SOCKET, SO_NOSIGPIPE, &one, sizeof(one));
+#endif
     rx_ts_ = net::enable_timestamps(fd_, false);
 
     ctx_ = SSL_CTX_new(TLS_client_method());

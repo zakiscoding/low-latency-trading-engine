@@ -49,6 +49,10 @@ class Ilp {
     safety::require_allowed(std::string("tcp://") + ip);
     fd_ = ::socket(AF_INET, SOCK_STREAM, 0);
     a.sin_port = htons(static_cast<std::uint16_t>(port));
+#if defined(SO_NOSIGPIPE)
+    int one = 1;
+    ::setsockopt(fd_, SOL_SOCKET, SO_NOSIGPIPE, &one, sizeof(one));
+#endif
     if (::connect(fd_, reinterpret_cast<sockaddr*>(&a), sizeof(a)) != 0)
       throw std::runtime_error("cannot connect to QuestDB ILP at " + hostport);
     buf_.reserve(1 << 20);

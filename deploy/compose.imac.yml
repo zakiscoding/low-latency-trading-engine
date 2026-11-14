@@ -19,7 +19,9 @@ services:
       IDLE_WAIT_MS: "1"  # shared host: sleep when idle instead of spinning two cores
       NOTE: "Always-on host: Apple M1 iMac (Colima VM), engine in low-CPU mode (sleeps in poll() when idle). Not a benchmark setup."
     volumes:
-      - ./secrets/ingest:/run/secrets/ingest:ro
+      # Named volume, filled once with tools/imac-secret.sh: Colima on the iMac
+      # doesn't share the external drive with its VM, so a bind mount shows up empty.
+      - lle-secrets:/run/secrets:ro
     mem_limit: 256m
     shm_size: 64m
 
@@ -46,3 +48,5 @@ services:
 
 volumes:
   questdb-data:
+  lle-secrets:
+    external: true

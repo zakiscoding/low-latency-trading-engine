@@ -8,8 +8,10 @@
 // socket error queue and are drained only when the loop is idle.
 #include <arpa/inet.h>
 #include <fcntl.h>
+#if defined(__linux__)
 #include <linux/errqueue.h>
 #include <linux/net_tstamp.h>
+#endif
 #include <netinet/in.h>
 #include <sys/socket.h>
 #include <unistd.h>
@@ -62,21 +64,37 @@ inline void set_nonblocking(int fd) { ::fcntl(fd, F_SETFL, ::fcntl(fd, F_GETFL) 
 
 // SO_RCVBUFFORCE (CAP_NET_ADMIN) ignores net.core.rmem_max, so no global sysctl change is needed.
 inline void set_rcvbuf(int fd, int bytes) {
-  if (::setsockopt(fd, SOL_SOCKET, SO_RCVBUFFORCE, &bytes, sizeof(bytes)) != 0)
-    ::setsockopt(fd, SOL_SOCKET, SO_RCVBUF, &bytes, sizeof(bytes));
+#if defined(__linux__)
+  if (::setsockopt(fd, SOL_SOCKET, SO_RCVBUFFORCE, &bytes, sizeof(bytes)) == 0) return;
+#endif
+  ::setsockopt(fd, SOL_SOCKET, SO_RCVBUF, &bytes, sizeof(bytes));
 }
 
 // Enables software RX (and optionally TX) timestamps. Returns false if refused.
+// Linux only; elsewhere (macOS) this returns false and latency is measured from
+// user space only.
 inline bool enable_timestamps(int fd, bool tx) {
+#if !defined(__linux__)
+  (void)fd;
+  (void)tx;
+  return false;
+#else
   int flags = SOF_TIMESTAMPING_RX_SOFTWARE | SOF_TIMESTAMPING_SOFTWARE;
   if (tx) flags |= SOF_TIMESTAMPING_TX_SOFTWARE | SOF_TIMESTAMPING_OPT_TSONLY | SOF_TIMESTAMPING_OPT_ID;
   return ::setsockopt(fd, SOL_SOCKET, SO_TIMESTAMPING, &flags, sizeof(flags)) == 0;
+#endif
 }
 
 // SO_BUSY_POLL makes a blocking/non-blocking receive poll the NIC queue for up to
 // `usec` before sleeping. Needs CAP_NET_ADMIN to raise above the sysctl default.
 inline bool enable_busy_poll(int fd, int usec) {
+#if defined(__linux__)
   return ::setsockopt(fd, SOL_SOCKET, SO_BUSY_POLL, &usec, sizeof(usec)) == 0;
+#else
+  (void)fd;
+  (void)usec;
+  return false;
+#endif
 }
 
 inline int bind_udp(const std::string& host, int port) {
@@ -96,6 +114,10 @@ inline void connect_udp(int fd, const sockaddr_in& to) {
 
 // Extracts the software timestamp (CLOCK_REALTIME ns) from a received msghdr.
 inline std::int64_t rx_timestamp_ns(msghdr* m) noexcept {
+#if !defined(__linux__)
+  (void)m;
+  return 0;
+#else
   for (cmsghdr* c = CMSG_FIRSTHDR(m); c; c = CMSG_NXTHDR(m, c)) {
     if (c->cmsg_level == SOL_SOCKET && c->cmsg_type == SO_TIMESTAMPING) {
       timespec ts[3];
@@ -104,6 +126,7 @@ inline std::int64_t rx_timestamp_ns(msghdr* m) noexcept {
     }
   }
   return 0;
+#endif
 }
 
 // One receive slot: buffer, iovec, msghdr and control space, all preallocated.
@@ -224,6 +247,10 @@ class Sender {
   template <class F>
   int drain_tx_timestamps(F&& f) noexcept {
     if (!tx_ts_) return 0;
+#if !defined(__linux__)
+    (void)f;
+    return 0;
+#else
     int k = 0;
     unsigned char ctrl[512];
     unsigned char data[64];
@@ -253,6 +280,7 @@ class Sender {
       k++;
     }
     return k;
+#endif
   }
 
   int fd() const noexcept { return fd_; }
