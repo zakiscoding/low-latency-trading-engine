@@ -1,7 +1,8 @@
 // Durable Objects: MarketHub (fan-out + edge cache), Account (per-user paper
 // simulator), Leaderboard (weekly paper P&L), ClientRateLimiter (sliding window).
 import { DurableObject } from "cloudflare:workers";
-import { applyUpstream, bookFor, emptyHub } from "./hubstate.js";
+import { applyUpstream, bookFor, candlesView, emptyHub } from "./hubstate.js";
+import { metricsView } from "./metrics.js";
 import * as sim from "./sim.js";
 
 const MAX_VIEWERS = 1000;
@@ -16,8 +17,14 @@ export class MarketHub extends DurableObject {
     this.pending = new Map(); // admin command id -> resolve
     this.paused = false;
     ctx.blockConcurrencyWhile(async () => {
+      const bars = await ctx.storage.get("candles");
+      if (bars) Object.assign(this.hub, { candles: bars.candles ?? [], candleWm: bars.wm ?? 0, candleWmKeys: bars.wmKeys ?? [] });
+      const met = await ctx.storage.get("metrics");
+      if (met) Object.assign(this.hub.metrics, { rows: met.rows ?? [], markouts: met.markouts ?? [], seen: met.seen ?? [] });
       const saved = await ctx.storage.get("snap");
       if (saved) applyUpstream(this.hub, saved);
+      this.hub.candlesDirty = false;
+      this.hub.metricsDirty = false;
     });
   }
 
@@ -51,6 +58,12 @@ export class MarketHub extends DurableObject {
     }
     if (url.pathname === "/snapshot") {
       return Response.json(this.hub.snap ? this.publicSnap() : { t: "offline" });
+    }
+    if (url.pathname === "/metrics") {
+      return Response.json(metricsView(this.hub.metrics, this.hub.snap, Date.now()));
+    }
+    if (url.pathname === "/candles") {
+      return Response.json(candlesView(this.hub));
     }
     if (url.pathname === "/book") {
       return Response.json(bookFor(this.hub, Number(url.searchParams.get("since") ?? 0)));
@@ -110,6 +123,16 @@ export class MarketHub extends DurableObject {
     }
     if (!applyUpstream(this.hub, msg)) return;
     if (msg.t === "snap") await this.ctx.storage.put("snap", this.hub.snap);
+    if (this.hub.candlesDirty) {
+      // A new 1-minute bar started: persist the closed ones (about one write a minute).
+      this.hub.candlesDirty = false;
+      await this.ctx.storage.put("candles", { candles: this.hub.candles, wm: this.hub.candleWm, wmKeys: this.hub.candleWmKeys });
+    }
+    if (this.hub.metricsDirty) {
+      this.hub.metricsDirty = false;
+      const m = this.hub.metrics;
+      await this.ctx.storage.put("metrics", { rows: m.rows, markouts: m.markouts, seen: m.seen });
+    }
     const out = msg.t === "snap" ? JSON.stringify(this.publicSnap()) : message;
     for (const v of this.viewers()) {
       try {

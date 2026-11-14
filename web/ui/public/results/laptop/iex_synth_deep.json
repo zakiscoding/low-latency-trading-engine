@@ -1,0 +1,1 @@
+{"bench":"iex_replay","feed":"DEEP","cpu":"12th Gen Intel(R) Core(TM) i3-1215U","segments":418217,"messages":2000000,"levels":2000000,"gaps":0,"segment":{"count":418217,"p50":169,"p90":275,"p99":407,"p999":823,"max":28842172,"min":35},"per_message":{"count":418217,"p50":36,"p90":59,"p99":92,"p999":213,"max":4120310,"min":17}}

@@ -26,7 +26,7 @@ function Admin() {
   return (
     <>
       <div className="paper-banner">ADMIN · PAPER TRADING ENGINE · NO REAL ORDERS</div>
-      <main>
+      <main className="page">
         <div className="grid">
           <section className="card span-6">
             <h2>Strategy</h2>

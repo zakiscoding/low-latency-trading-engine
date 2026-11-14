@@ -52,6 +52,7 @@ export function newAccount(now) {
     fees: 0n,
     open: [], // {id, side, price, qty, ahead, ts}
     fills: [], // last 50
+    history: [], // last 50 orders: {id, side, type, price, qty, filled, status, ts, closedTs}
     nextId: 1,
     day: dayKey(now),
     ordersToday: 0,
@@ -74,6 +75,25 @@ export function weekKey(ms) {
 function recordFill(acct, f) {
   acct.fills.push(f);
   if (acct.fills.length > 50) acct.fills.splice(0, acct.fills.length - 50);
+  const h = (acct.history ?? []).find((x) => x.id === f.orderId);
+  if (h) h.filled += f.qty;
+}
+
+function recordOrder(acct, entry) {
+  acct.history ??= [];
+  acct.history.push(entry);
+  if (acct.history.length > 50) acct.history.splice(0, acct.history.length - 50);
+}
+
+// Marks history entries of orders that left the book. status: filled | cancelled | expired.
+function closeOrders(acct, gone, status, now) {
+  for (const o of gone) {
+    const h = (acct.history ?? []).find((x) => x.id === o.id);
+    if (h && h.status === "open") {
+      h.status = status ?? (h.filled >= h.qty ? "filled" : "cancelled");
+      h.closedTs = now;
+    }
+  }
 }
 
 function applyFill(acct, side, price, qty, maker, ts, orderId) {
@@ -136,6 +156,8 @@ export function placeOrder(acct, book, req, now) {
 
   acct.ordersToday++;
   const id = acct.nextId++;
+  const entry = { id, side, type, price: limit, qty, filled: 0n, status: "open", ts: now, closedTs: null };
+  recordOrder(acct, entry);
   let left = qty;
   const levels = side === "buy" ? asks : bids;
   for (const [p, q] of levels) {
@@ -153,6 +175,9 @@ export function placeOrder(acct, book, req, now) {
     const at = own.find(([p]) => p === limit);
     rested = { id, side, price: limit, qty: left, ahead: at ? at[1] : 0n, ts: now };
     acct.open.push(rested);
+  } else {
+    entry.status = left === 0n ? "filled" : "cancelled"; // market remainder is cancelled
+    entry.closedTs = now;
   }
   return { id, filled: qty - left, rested: rested ? rested.qty : 0n, cancelled: type === "market" ? left : 0n };
 }
@@ -160,7 +185,8 @@ export function placeOrder(acct, book, req, now) {
 export function cancelOrder(acct, id) {
   const i = acct.open.findIndex((o) => o.id === id);
   if (i < 0) return false;
-  acct.open.splice(i, 1);
+  const [o] = acct.open.splice(i, 1);
+  closeOrders(acct, [o], "cancelled", Date.now());
   return true;
 }
 
@@ -194,6 +220,7 @@ export function applyMarket(acct, book, trades, now) {
       q -= take;
       filled++;
     }
+    closeOrders(acct, acct.open.filter((o) => o.qty <= 0n), "filled", now);
     acct.open = acct.open.filter((o) => o.qty > 0n);
   }
   // Opposite touch crossed a resting order: it would have traded.
@@ -212,9 +239,11 @@ export function applyMarket(acct, book, trades, now) {
       const shown = lvl ? BigInt(lvl[1]) : 0n;
       if (o.ahead > shown) o.ahead = shown;
     }
+    closeOrders(acct, acct.open.filter((o) => o.qty <= 0n), "filled", now);
     acct.open = acct.open.filter((o) => o.qty > 0n);
   }
   // Expire old orders.
+  closeOrders(acct, acct.open.filter((o) => now - o.ts >= LIMITS.orderTtlMs), "expired", now);
   acct.open = acct.open.filter((o) => now - o.ts < LIMITS.orderTtlMs);
   return filled;
 }
@@ -236,6 +265,7 @@ export function view(acct, book) {
     pnl_micros: s(equityMicros(acct, book) - START_CASH_MICROS),
     open: acct.open.map((o) => ({ id: o.id, side: o.side, price: s(o.price), qty: s(o.qty), ahead: s(o.ahead), ts: o.ts })),
     fills: acct.fills.map((f) => ({ ...f, price: s(f.price), qty: s(f.qty), fee: s(f.fee) })),
+    history: (acct.history ?? []).map((h) => ({ ...h, price: h.price === null ? null : s(h.price), qty: s(h.qty), filled: s(h.filled) })),
     orders_today: acct.ordersToday,
     limits: {
       max_qty_btc: "0.5",

@@ -119,3 +119,22 @@ test("week key is Monday UTC", () => {
   assert.equal(sim.weekKey(Date.UTC(2026, 10, 9, 0, 0, 1)), "2026-11-09");
   assert.equal(sim.weekKey(Date.UTC(2026, 10, 8, 23, 59)), "2026-11-02");
 });
+
+test("order history tracks fills, rests, cancels", () => {
+  const book = { bids: [[10000, 100000000n]], asks: [[10010, 100000000n]] };
+  const a = sim.newAccount(0);
+  const m = sim.placeOrder(a, book, { side: "buy", type: "market", qty: "0.01" }, 1);
+  const l = sim.placeOrder(a, book, { side: "buy", type: "limit", qty: "0.01", price: "99.00" }, 2);
+  assert.equal(sim.cancelOrder(a, l.id), true);
+  const v = sim.view(a, book);
+  assert.equal(v.history.length, 2);
+  assert.deepEqual(
+    v.history.map((h) => [h.id, h.type, h.status, h.filled]),
+    [[m.id, "market", "filled", "1000000"], [l.id, "limit", "cancelled", "0"]],
+  );
+  // Accounts saved before history existed still load and trade.
+  const old = sim.deserialize(sim.serialize({ ...sim.newAccount(0), history: undefined }));
+  delete old.history;
+  assert.ok(!sim.placeOrder(old, book, { side: "buy", type: "market", qty: "0.01" }, 3).error);
+  assert.equal(sim.view(old, book).history.length, 1);
+});
