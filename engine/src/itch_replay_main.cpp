@@ -77,7 +77,7 @@ int main(int argc, char** argv, char** envp) {
     for (const auto& p : pkts) {
       if (g_stop) break;
       if (gap) {
-        while (rdtsc_unordered() < next) _mm_pause();
+        while (rdtsc_unordered() < next) cpu_relax();
         next += gap;
       }
       if (to_exch && !to_exch->send(p.data(), p.size())) drops++;

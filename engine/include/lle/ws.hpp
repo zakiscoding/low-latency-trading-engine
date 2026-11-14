@@ -15,7 +15,7 @@
 #include <openssl/rand.h>
 #include <openssl/ssl.h>
 #include <poll.h>
-#include <x86intrin.h>
+#include "lle/tsc.hpp"
 #include <sys/socket.h>
 #include <unistd.h>
 
@@ -247,7 +247,7 @@ class Client {
       got = true;
     }
     if (got) drain_ssl();
-    decrypted_tsc_ = __rdtsc();
+    decrypted_tsc_ = rdtsc_unordered();
     for (;;) {
       std::size_t used = 0;
       FrameEvent ev;

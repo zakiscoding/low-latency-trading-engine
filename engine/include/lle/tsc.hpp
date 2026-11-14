@@ -1,23 +1,55 @@
 #pragma once
-// Time-stamp counter helpers. Assumes an invariant TSC (constant_tsc + nonstop_tsc),
-// which every x86 CPU from the last decade has; check /proc/cpuinfo on the target.
+// Cycle-counter helpers.
+//  x86-64: the TSC. Assumes an invariant TSC (constant_tsc + nonstop_tsc), which
+//          every x86 CPU from the last decade has; check /proc/cpuinfo.
+//  arm64:  the generic timer's virtual counter (cntvct_el0). It ticks at a fixed
+//          frequency (24 MHz on Apple M1, ~42 ns per tick), so stage timings are
+//          much coarser than on x86; calibrate() measures the rate the same way.
 #include <time.h>
-#include <x86intrin.h>
 
 #include <cstdint>
+
+#if defined(__x86_64__)
+#include <x86intrin.h>
+#elif !defined(__aarch64__)
+#error "lle supports x86-64 and arm64"
+#endif
 
 #include "lle/common.hpp"
 
 namespace lle {
 
-// rdtsc is not ordered against earlier loads; lfence before it keeps a stage's
-// work from leaking past the stamp. Cost ~20-30 cycles, paid once per stage.
+LLE_ALWAYS_INLINE std::uint64_t rdtsc_unordered() noexcept {
+#if defined(__x86_64__)
+  return __rdtsc();
+#else
+  std::uint64_t v;
+  asm volatile("mrs %0, cntvct_el0" : "=r"(v));
+  return v;
+#endif
+}
+
+// The counter read is not ordered against earlier loads; a fence before it keeps
+// a stage's work from leaking past the stamp (lfence on x86, isb on arm64).
 LLE_ALWAYS_INLINE std::uint64_t rdtsc() noexcept {
   asm volatile("" ::: "memory");  // compiler barrier: don't move memory ops across the stamp
+#if defined(__x86_64__)
   _mm_lfence();
-  const std::uint64_t t = __rdtsc();
+#else
+  asm volatile("isb" ::: "memory");
+#endif
+  const std::uint64_t t = rdtsc_unordered();
   asm volatile("" ::: "memory");
   return t;
+}
+
+// Spin-wait hint.
+LLE_ALWAYS_INLINE void cpu_relax() noexcept {
+#if defined(__x86_64__)
+  _mm_pause();
+#else
+  asm volatile("yield");
+#endif
 }
 
 // Forces a value to be materialised before the next stamp (stops the compiler
@@ -27,7 +59,6 @@ LLE_ALWAYS_INLINE void keep(const T& v) noexcept {
   asm volatile("" : : "r,m"(v) : "memory");
 }
 
-LLE_ALWAYS_INLINE std::uint64_t rdtsc_unordered() noexcept { return __rdtsc(); }
 
 inline std::int64_t clock_ns(clockid_t id) noexcept {
   timespec ts;
