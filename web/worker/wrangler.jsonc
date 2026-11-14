@@ -1,0 +1,31 @@
+// Paper-trading site. Serves on workers.dev (no custom domain).
+// Secrets (wrangler secret put): INGEST_SECRET, SESSION_SECRET, GITHUB_CLIENT_SECRET,
+// GOOGLE_CLIENT_SECRET, TURNSTILE_SECRET. Vars below are public identifiers.
+{
+  "name": "paper-trading",
+  "main": "src/index.js",
+  "compatibility_date": "2026-11-01",
+  "workers_dev": true,
+  "assets": {
+    "directory": "../ui/dist",
+    "binding": "ASSETS",
+    "not_found_handling": "single-page-application",
+    "run_worker_first": ["/ws", "/ingest", "/api/*", "/auth/*", "/admin", "/admin/*", "/admin.html"]
+  },
+  "durable_objects": {
+    "bindings": [
+      { "name": "HUB", "class_name": "MarketHub" },
+      { "name": "ACCOUNT", "class_name": "Account" },
+      { "name": "LEADERBOARD", "class_name": "Leaderboard" },
+      { "name": "LIMITER", "class_name": "ClientRateLimiter" }
+    ]
+  },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["MarketHub", "Account", "Leaderboard", "ClientRateLimiter"] }],
+  "vars": {
+    "GITHUB_CLIENT_ID": "",
+    "GOOGLE_CLIENT_ID": "",
+    "TURNSTILE_SITE_KEY": "",
+    "ACCESS_TEAM_DOMAIN": "",
+    "ACCESS_AUD": ""
+  }
+}

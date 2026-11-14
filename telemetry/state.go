@@ -271,7 +271,7 @@ func (s *State) bestMid() int64 {
 }
 
 func levelsSorted(m map[int64]int64, desc bool) []Level {
-	out := make([]Level, 0, len(m))
+	out := make([]Level, 0, len(m)) // never nil: JSON [] not null
 	for p, q := range m {
 		out = append(out, Level{p, q})
 	}
@@ -355,7 +355,7 @@ func (s *State) Snapshot() Snapshot {
 	return Snapshot{
 		T: "snap", Seq: s.seq, Ts: time.Now().UnixNano(), Meta: s.Meta,
 		Bids: levelsSorted(s.bids, true), Asks: levelsSorted(s.asks, false),
-		Trades: append([]Trade(nil), s.trades...), Fills: append([]Fill(nil), s.fills...),
+		Trades: append([]Trade{}, s.trades...), Fills: append([]Fill{}, s.fills...),
 		Latency: s.latencyJSON(), Stats: st,
 	}
 }

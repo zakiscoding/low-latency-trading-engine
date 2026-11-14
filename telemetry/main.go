@@ -139,7 +139,7 @@ func signToken(secret []byte, now time.Time) string {
 	return ts + "." + hex.EncodeToString(m.Sum(nil))
 }
 
-func (s *server) uplink(ctx context.Context, url string, secret []byte, rate time.Duration) {
+func (s *server) uplink(ctx context.Context, url string, secret []byte) {
 	backoff := time.Second
 	for ctx.Err() == nil {
 		hdr := http.Header{}
@@ -160,12 +160,12 @@ func (s *server) uplink(ctx context.Context, url string, secret []byte, rate tim
 		backoff = time.Second
 		log.Printf("uplink: connected to %s", url)
 		c.SetReadLimit(1 << 20)
-		s.runUplink(ctx, c, rate)
+		s.runUplink(ctx, c)
 		c.CloseNow()
 	}
 }
 
-func (s *server) runUplink(ctx context.Context, c *websocket.Conn, rate time.Duration) {
+func (s *server) runUplink(ctx context.Context, c *websocket.Conn) {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	send := func(v any) error {
@@ -196,16 +196,22 @@ func (s *server) runUplink(ctx context.Context, c *websocket.Conn, rate time.Dur
 				s.paused = m.T == "pause"
 				s.pauseMu.Unlock()
 				log.Printf("uplink: %s", m.T)
+				if m.T == "resume" { // deltas were dropped while paused: resync
+					send(s.st.Snapshot())
+				}
 			case "snap?":
 				send(s.st.Snapshot())
 			}
 		}
 	}()
+	// Deltas come from the single producer (see main), shared with the local
+	// listener: computing them here as well would split the change stream between
+	// consumers. Subscribe before the snapshot so nothing falls in between.
+	ch := s.hub.add()
+	defer s.hub.del(ch)
 	if send(s.st.Snapshot()) != nil {
 		return
 	}
-	tick := time.NewTicker(rate)
-	defer tick.Stop()
 	snapEvery := time.NewTicker(30 * time.Second)
 	defer snapEvery.Stop()
 	for {
@@ -216,17 +222,18 @@ func (s *server) runUplink(ctx context.Context, c *websocket.Conn, rate time.Dur
 			if send(s.st.Snapshot()) != nil {
 				return
 			}
-		case <-tick.C:
+		case b := <-ch:
 			s.pauseMu.Lock()
 			p := s.paused
 			s.pauseMu.Unlock()
 			if p {
 				continue
 			}
-			if d := s.st.Delta(); d != nil {
-				if send(d) != nil {
-					return
-				}
+			wctx, wc := context.WithTimeout(ctx, 5*time.Second)
+			err := c.Write(wctx, websocket.MessageText, b)
+			wc()
+			if err != nil {
+				return
 			}
 		}
 	}
@@ -295,9 +302,9 @@ func main() {
 		if err != nil || len(strings.TrimSpace(string(secret))) < 32 {
 			log.Fatalf("uplink needs --uplink-secret-file with >= 32 chars")
 		}
-		go srv.uplink(ctx, *uplinkURL, []byte(strings.TrimSpace(string(secret))), rate)
+		go srv.uplink(ctx, *uplinkURL, []byte(strings.TrimSpace(string(secret))))
 	}
-	// Local publisher for the debug listener.
+	// The one delta producer: every consumer (uplink, local listener) gets the same stream.
 	go func() {
 		t := time.NewTicker(rate)
 		for range t.C {

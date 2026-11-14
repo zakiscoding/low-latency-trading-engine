@@ -12,7 +12,7 @@ TEST(Safety, PaperEndpointIsTheOnlyOrderHost) {
   // Live Alpaca trading host, built at runtime so the repo scan stays meaningful.
   const std::string live = std::string("https://") + "api." + "alpaca.markets/v2/orders";
   EXPECT_EQ(check_endpoint(live), Verdict::Refused);
-  EXPECT_EQ(check_endpoint("https://broker-api.alpaca.markets"), Verdict::Refused);
+  EXPECT_EQ(check_endpoint(std::string("https://broker-api.") + "alpaca.markets"), Verdict::Refused);
   const std::string cb_orders = std::string("https://api.") + "coinbase.com/api/v3/brokerage/orders";
   EXPECT_EQ(check_endpoint(cb_orders), Verdict::Refused);
   EXPECT_EQ(check_endpoint("https://example.com"), Verdict::Refused);

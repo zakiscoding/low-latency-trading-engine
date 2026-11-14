@@ -1,0 +1,17 @@
+{
+  "name": "paper-trading-site",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test",
+    "dev": "wrangler dev",
+    "check": "wrangler deploy --dry-run --outdir .wrangler/dry-run",
+    "deploy": "node --test && npm --prefix ../ui run build && wrangler deploy"
+  },
+  "dependencies": {
+    "jose": "6.1.0"
+  },
+  "devDependencies": {
+    "wrangler": "4.157.0"
+  }
+}
