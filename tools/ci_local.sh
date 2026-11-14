@@ -23,7 +23,7 @@ for j in $jobs; do
              mkdir -p /tmp/corpus-itch && /build/rel/itch_synth --messages 40 --out /tmp/corpus-itch/seed.itch 2>/dev/null || true
              secs=${FUZZ_SECONDS:-60}
              /build/fuzz/fuzz_itch -max_total_time=$secs -max_len=4096 /tmp/corpus-itch 2>&1 | tail -2
-             /build/fuzz/fuzz_coinbase -max_total_time=$secs -max_len=8192 engine/fuzz/corpus/coinbase 2>&1 | tail -2
+             mkdir -p /tmp/corpus-cb && /build/fuzz/fuzz_coinbase -max_total_time=$secs -max_len=8192 /tmp/corpus-cb engine/fuzz/corpus/coinbase 2>&1 | tail -2
              /build/fuzz/fuzz_ws -max_total_time=$secs -max_len=4096 2>&1 | tail -2 ;;
   esac
 done

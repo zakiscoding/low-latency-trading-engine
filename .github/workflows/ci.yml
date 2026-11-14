@@ -68,7 +68,8 @@ jobs:
           mkdir -p corpus-itch
           ./build-fuzz/itch_synth --messages 40 --out corpus-itch/seed.itch
           ./build-fuzz/fuzz_itch -max_total_time=60 -max_len=4096 corpus-itch
-          ./build-fuzz/fuzz_coinbase -max_total_time=60 -max_len=8192 engine/fuzz/corpus/coinbase
+          mkdir -p corpus-cb
+          ./build-fuzz/fuzz_coinbase -max_total_time=60 -max_len=8192 corpus-cb engine/fuzz/corpus/coinbase
           ./build-fuzz/fuzz_ws -max_total_time=60 -max_len=4096
 
   telemetry:

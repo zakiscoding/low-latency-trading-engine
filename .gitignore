@@ -19,3 +19,6 @@ web/ui/dist/
 .wrangler/
 .dev.vars
 telemetry/telemetry
+# libFuzzer writes new inputs here; only hand-picked seeds are committed
+engine/fuzz/corpus/**/*
+!engine/fuzz/corpus/**/seed*

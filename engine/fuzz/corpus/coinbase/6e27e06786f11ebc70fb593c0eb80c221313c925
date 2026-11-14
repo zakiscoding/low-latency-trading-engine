@@ -1,1 +1,0 @@
-{"channel":"l2_data","timestamp":"2026-11-14T04:22:03.843671378Z","sequence_num":0,"events":[{"type":"snapshot","product_id":"BTC-USD","updates":[{"side":"bid","event_ti9Z","price_level":"66785","new_q"new_quantity":"8"},{"side":"offer","event_time":"2026-11-14T04:22:03.552549Z","price_level":"79012.6","new_quantity":"1.00000001"}]}]}
