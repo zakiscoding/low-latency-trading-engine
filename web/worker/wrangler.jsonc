@@ -22,10 +22,10 @@
   },
   "migrations": [{ "tag": "v1", "new_sqlite_classes": ["MarketHub", "Account", "Leaderboard", "ClientRateLimiter"] }],
   "vars": {
-    "GITHUB_CLIENT_ID": "",
-    "GOOGLE_CLIENT_ID": "",
-    "TURNSTILE_SITE_KEY": "",
-    "ACCESS_TEAM_DOMAIN": "",
+    "GITHUB_CLIENT_ID": "Ov23liKxyKXrKhKWlrIW",
+    "GOOGLE_CLIENT_ID": "361366559717-cklk29g73t2ag2cfpttrr2b65eddo74e.apps.googleusercontent.com",
+    "TURNSTILE_SITE_KEY": "0x4AAAAAAGAyGXMiIsotpwIc",
+    "ACCESS_TEAM_DOMAIN": "https://billowing-mountain-e775.cloudflareaccess.com",
     "ACCESS_AUD": ""
   }
 }
