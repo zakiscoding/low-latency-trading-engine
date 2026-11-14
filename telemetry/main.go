@@ -248,6 +248,7 @@ func main() {
 	uplinkURL := flag.String("uplink", "", "wss://.../ingest of the Worker (empty = local only)")
 	secretFile := flag.String("uplink-secret-file", "", "file holding the shared ingest secret")
 	hz := flag.Int("hz", 10, "delta rate (10-20)")
+	note := flag.String("note", "", "shown to viewers under the live latency chart (host, mode)")
 	replayCmd := flag.String("replay-cmd", "", "command run for the admin 'replay' op")
 	flag.Parse()
 
@@ -258,7 +259,7 @@ func main() {
 		"bitstamp": "Market data: Bitstamp (bitstamp.net)",
 		"itch":     "Replay of a NASDAQ TotalView-ITCH 5.0 sample file",
 	}[*venue]
-	st := NewState(Meta{Venue: *venue, Product: *product, PriceDec: 2, QtyDec: 8, Attribution: attribution})
+	st := NewState(Meta{Venue: *venue, Product: *product, PriceDec: 2, QtyDec: 8, Attribution: attribution, Note: *note})
 	if *venue == "itch" {
 		st.Meta.QtyDec = 0
 	}

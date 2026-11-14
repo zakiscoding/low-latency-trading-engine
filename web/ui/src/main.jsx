@@ -288,6 +288,7 @@ function Live({ state }) {
           In-process: last byte of the decrypted message available → order <code>send()</code> returned, measured with{" "}
           <code>rdtsc</code> on the engine&apos;s pinned thread.
         </p>
+        {meta?.note && <p className="note">{meta.note}</p>}
         {wire?.n > 0 && (
           <>
             <h2 style={{ marginTop: 12 }}>Kernel RX → send, live</h2>

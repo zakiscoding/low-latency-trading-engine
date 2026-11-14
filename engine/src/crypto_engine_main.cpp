@@ -8,6 +8,8 @@
 // Stages (rdtsc): decode = socket reads + TLS decrypt, once per read; parse_apply = JSON scan + book updates (interleaved, so
 // one stage); decide; build; send. kernel_rx_to_send uses the TCP socket's
 // SO_TIMESTAMPING RX stamp of the last segment of the message.
+#include <poll.h>
+
 #include <cstdio>
 #include <fstream>
 #include <memory>
@@ -161,12 +163,15 @@ int main(int argc, char** argv, char** envp) {
   std::uint64_t last_print = start, last_snap = start;
   unsigned char exec_buf[128];
   std::uint64_t fills = 0;
+  const int idle_wait_ms = static_cast<int>(a.num("idle-wait-ms", 0));
   while (!g_stop) {
     // Each message's clock starts when the previous one in the same read finished
     // (or when TLS decrypt finished, for the first), so batching doesn't inflate it.
     const std::uint64_t t_poll = rdtsc_unordered();
     std::uint64_t t_prev_end = 0;
+    bool got = false;
     const bool ok = c.poll([&](const unsigned char* m, std::size_t n, std::int64_t krx) {
+      got = true;
       const std::uint64_t t0 = rdtsc();
       if (!t_prev_end) {
         eng.h[cDecode].record(c.decrypted_tsc() - t_poll);  // recvmsg loop + TLS decrypt, once per read
@@ -188,6 +193,12 @@ int main(int argc, char** argv, char** envp) {
     if (!ok) {
       std::fprintf(stderr, "crypto_engine: connection closed\n");
       break;
+    }
+    // Low-CPU mode for shared hosts (--idle-wait-ms N): sleep in poll() when idle
+    // instead of spinning. Adds wake-up latency; not used for benchmarks.
+    if (idle_wait_ms > 0 && !got) {
+      pollfd pf[2] = {{c.fd(), POLLIN, 0}, {tx.fd(), POLLIN, 0}};
+      ::poll(pf, 2, idle_wait_ms);
     }
     // Idle-side work.
     if (ctrl && ctrl->changed()) {

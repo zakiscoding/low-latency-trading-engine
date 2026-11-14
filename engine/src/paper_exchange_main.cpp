@@ -7,6 +7,7 @@
 //                  [--latency-us 20] [--cpu 4] [--stats-json out.json]
 //   paper_exchange --source bitstamp|coinbase --product BTC-USD --orders 127.0.0.1:31012 --feed 127.0.0.1:31010
 //                  [--taker-bp100 6000] [--maker-bp100 4000] [--latency-us 20000]
+#include <poll.h>
 #include <unistd.h>
 
 #include <cstdio>
@@ -128,11 +129,13 @@ int main(int argc, char** argv, char** envp) {
   itch::ParseStats st;
   std::uint64_t feed_pkts = 0, orders = 0;
   std::int64_t last_print = clock_ns(CLOCK_MONOTONIC);
+  const int idle_wait_ms = static_cast<int>(a.num("idle-wait-ms", 0));
   while (!g_stop) {
     bool any = false;
     if (cbc && !cbc->poll([&](const unsigned char* m, std::size_t len, std::int64_t) {
           vf->parse(m, len, mirror, cst);
           feed_pkts++;
+          any = true;
         })) {
       std::fprintf(stderr, "paper_exchange: coinbase connection closed\n");
       break;
@@ -155,6 +158,12 @@ int main(int argc, char** argv, char** envp) {
       any = true;
     }
     x.tick(now);
+    // Low-CPU mode (--idle-wait-ms N): sleep in poll() when idle; wake within 1 ms
+    // while orders are waiting out their simulated latency.
+    if (idle_wait_ms > 0 && !any) {
+      pollfd pf[3] = {{feed_fd, POLLIN, 0}, {ord_fd, POLLIN, 0}, {cbc ? cbc->fd() : -1, POLLIN, 0}};
+      ::poll(pf, 3, x.pending() ? 1 : idle_wait_ms);
+    }
     if (!any && now - last_print > 5'000'000'000ll) {
       const auto& ac = x.account();
       std::fprintf(stderr, "paper_exchange: feed_pkts=%llu orders=%llu fills=%llu (maker %llu taker %llu) "

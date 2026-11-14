@@ -1,4 +1,4 @@
-# Always-on host for the public demo: mos-imac (Apple M1, Colima VM with 6 GiB).
+# Always-on host for the public demo: mos-imac (Apple M1, Colima VM with 4 GiB shared with the homelab stack).
 # Images are built on the laptop for linux/arm64 and loaded with `docker load`
 # (Colima there has no buildx and registry pulls time out). See docs/DEPLOY.md.
 #
@@ -16,6 +16,8 @@ services:
       ENGINE_CPU: "1"
       EXCH_CPU: "2"
       HZ: "10"
+      IDLE_WAIT_MS: "1"  # shared host: sleep when idle instead of spinning two cores
+      NOTE: "Always-on host: Apple M1 iMac (Colima VM), engine in low-CPU mode (sleeps in poll() when idle). Not a benchmark setup."
     volumes:
       - ./secrets/ingest:/run/secrets/ingest:ro
     mem_limit: 256m
@@ -26,14 +28,14 @@ services:
     image: questdb/questdb:9.1.0
     restart: unless-stopped
     environment:
-      JVM_PREPEND: "-Xms128m -Xmx384m"
+      JVM_PREPEND: "-Xms64m -Xmx256m"
       QDB_TELEMETRY_ENABLED: "false"
     ports:
       - "127.0.0.1:9000:9000"
       - "127.0.0.1:9009:9009"
     volumes:
       - questdb-data:/var/lib/questdb
-    mem_limit: 768m
+    mem_limit: 512m
 
   recorder:
     image: lle-live:arm64

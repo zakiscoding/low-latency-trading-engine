@@ -123,6 +123,7 @@ type Meta struct {
 	PriceDec    int    `json:"price_dec"`
 	QtyDec      int    `json:"qty_dec"`
 	Attribution string `json:"attribution"`
+	Note        string `json:"note,omitempty"` // where/how the live engine runs
 }
 
 type Stats struct {
