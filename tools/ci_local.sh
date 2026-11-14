@@ -19,11 +19,13 @@ for j in $jobs; do
     clang)   cmake -S . -B /build/clang -G Ninja -DCMAKE_CXX_COMPILER=clang++ >/dev/null
              ninja -C /build/clang >/dev/null && /build/clang/lle_tests --gtest_brief=1 ;;
     fuzz)    cmake -S . -B /build/fuzz -G Ninja -DCMAKE_CXX_COMPILER=clang++ -DLLE_FUZZ=ON -DLLE_TESTS=OFF -DLLE_NATIVE=OFF >/dev/null
-             ninja -C /build/fuzz fuzz_itch fuzz_coinbase fuzz_ws >/dev/null
+             ninja -C /build/fuzz fuzz_itch fuzz_coinbase fuzz_ws fuzz_iex >/dev/null
              mkdir -p /tmp/corpus-itch && /build/rel/itch_synth --messages 40 --out /tmp/corpus-itch/seed.itch 2>/dev/null || true
              secs=${FUZZ_SECONDS:-60}
              /build/fuzz/fuzz_itch -max_total_time=$secs -max_len=4096 /tmp/corpus-itch 2>&1 | tail -2
              mkdir -p /tmp/corpus-cb && /build/fuzz/fuzz_coinbase -max_total_time=$secs -max_len=8192 /tmp/corpus-cb engine/fuzz/corpus/coinbase 2>&1 | tail -2
-             /build/fuzz/fuzz_ws -max_total_time=$secs -max_len=4096 2>&1 | tail -2 ;;
+             /build/fuzz/fuzz_ws -max_total_time=$secs -max_len=4096 2>&1 | tail -2
+             mkdir -p /tmp/corpus-iex && /build/rel/iex_replay --synth /tmp/corpus-iex/seed.pcap --messages 30 --symbols-n 2 2>/dev/null || true
+             /build/fuzz/fuzz_iex -max_total_time=$secs -max_len=4096 /tmp/corpus-iex 2>&1 | tail -2 ;;
   esac
 done

@@ -62,7 +62,7 @@ jobs:
       - name: Build fuzzers
         run: |
           cmake -S . -B build-fuzz -G Ninja -DCMAKE_CXX_COMPILER=clang++-18 -DLLE_FUZZ=ON -DLLE_TESTS=OFF -DLLE_NATIVE=OFF
-          cmake --build build-fuzz --target fuzz_itch fuzz_coinbase fuzz_ws itch_synth
+          cmake --build build-fuzz --target fuzz_itch fuzz_coinbase fuzz_ws fuzz_iex itch_synth iex_replay
       - name: Fuzz (60 s each)
         run: |
           mkdir -p corpus-itch
@@ -71,6 +71,9 @@ jobs:
           mkdir -p corpus-cb
           ./build-fuzz/fuzz_coinbase -max_total_time=60 -max_len=8192 corpus-cb engine/fuzz/corpus/coinbase
           ./build-fuzz/fuzz_ws -max_total_time=60 -max_len=4096
+          mkdir -p corpus-iex
+          ./build-fuzz/iex_replay --synth corpus-iex/seed.pcap --messages 30 --symbols-n 2
+          ./build-fuzz/fuzz_iex -max_total_time=60 -max_len=4096 corpus-iex
 
   telemetry:
     runs-on: ubuntu-24.04

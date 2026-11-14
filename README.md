@@ -24,6 +24,8 @@ Every number below was measured on a **laptop inside a VM** and is labelled that
 | Strategy + risk | [strategy.hpp](engine/include/lle/strategy.hpp), [risk.hpp](engine/include/lle/risk.hpp) | Demo top-of-book imbalance taker (not expected to make money). The engine enforces its own risk limits: per-order size, position, notional, price band, orders/sec (token bucket on the TSC), orders/day, daily loss, and a kill switch |
 | Order output | [order_codec.hpp](engine/include/lle/order_codec.hpp) | Pre-serialized 64-byte order templates: sending patches 4 fields and calls `send()` |
 | Hot path | [pipeline.hpp](engine/include/lle/pipeline.hpp) | One pinned thread. No allocation, locks, logging, or system calls other than receive and send. Telemetry is written *after* the order leaves |
+| AF_XDP receive | [xdp.hpp](engine/include/lle/xdp.hpp) | Optional receive path (`--rx xdp`). A hand-assembled eBPF program, loaded with the raw `bpf()` syscall (no libbpf), steers one UDP port into a UMEM ring and stamps each packet at the XDP hook. Everything else goes to the normal stack. Generic, native and zero-copy modes |
+| IEX historical replay | [iex.hpp](engine/include/lle/iex.hpp), [iex_replay_main.cpp](engine/src/iex_replay_main.cpp) | pcap/pcapng reader, IEX-TP segments, DEEP price levels into per-symbol L2 ladders, TOPS quotes and trades. In place over an mmap'd file. Sequence-gap detection, and a seeded synthetic DEEP generator |
 | Live crypto feeds | [ws.hpp](engine/include/lle/ws.hpp), [coinbase.hpp](engine/include/lle/coinbase.hpp), [bitstamp.hpp](engine/include/lle/bitstamp.hpp) | Own TLS WebSocket client. TCP bytes are read with `recvmsg` (to keep kernel RX timestamps) and decrypted through OpenSSL memory BIOs. JSON is scanned in place into fixed-point numbers, with no allocation and no doubles |
 | Paper exchange | [paper_exchange.hpp](engine/include/lle/paper_exchange.hpp) | Fills against a mirror of the real book: added latency, queue position, trade-through and touch-cross fills, real fee schedules |
 | Telemetry | [telemetry/](telemetry/) (Go) | Reads a lock-free shared-memory ring that the engine writes and never waits on. Aggregates, then streams a snapshot plus 10–20 Hz deltas. Writes admin commands to the engine's control block |
@@ -141,6 +143,31 @@ Reproduce with `tools/dbuild.sh` (see [Running it](#running-it)). Raw JSON is in
 stamping a packet to user space seeing it is tens of µs to ms inside the Hyper-V VM. A UDP `send()` on
 loopback costs about 5 µs there. I'm including them as the "before" for steps 2 and 3, not as results.
 
+### Socket vs AF_XDP over a veth pair (laptop, generic XDP)
+
+[tools/xdp_veth_bench.sh](tools/xdp_veth_bench.sh) puts the engine and paper exchange in a network
+namespace behind a veth device, so packets cross a device and the XDP hook instead of loopback. Each mode
+got 1,000,000 synthetic ITCH packets at 100k/s; none were lost.
+
+| Receive mode | kernel stamp → user space p50 | kernel stamp → `send()` p50 | p99 | kernel stamp → TX stamp p50 |
+|---|---:|---:|---:|---:|
+| busy-spin socket | 1.76 µs | 5.18 µs | 1.36 ms | 3.52 µs |
+| `io_uring` | 3.87 µs | 7.68 µs | 9.31 ms | 5.89 µs |
+| AF_XDP, generic (copy) mode | **0.63 µs** | **4.22 µs** | 4.59 ms | **2.46 µs** |
+
+For AF_XDP the stamp is taken at the XDP hook, which is *earlier* than the socket path's SO_TIMESTAMPING
+point, so its numbers include more of the kernel and are still lower. The p50 win comes from skipping the
+IP/UDP stack and the socket queue. Generic mode still copies each packet; the zero-copy mode needs a NIC
+driver with native XDP. The tails are the VM's and not comparable between runs. Raw JSON:
+`results/laptop/veth_*.json`.
+
+### IEX DEEP replay (laptop, synthetic capture)
+
+`iex_replay` over a seeded synthetic DEEP capture (2M price-level messages, 8 symbols, 418k segments)
+measured parse plus L2 update at **36 ns p50 per message**, 92 ns p99 and 169 ns p50 per segment
+([iex_synth_deep.json](results/laptop/iex_synth_deep.json)). A real IEX HIST day hasn't been run yet,
+because the download needs the owner's OK under IEX's terms.
+
 ### L2 book replacement (found on the iMac)
 
 Bitstamp sends a top-100 snapshot about 10 times a second, and since the resync fix each one replaces the
@@ -166,7 +193,7 @@ latency is shown separately.
 |---|---|---|
 | 1. Hot path in code | Variants v0–v5 and compiler flags above | **Measured** (laptop) |
 | 2. OS tuning | `isolcpus`, `nohz_full`, `rcu_nocbs`, IRQ affinity to E-cores, P-core pinning, SMT sibling offline, performance governor, `mlockall`, huge pages | Scripts ready ([tuning/ubuntu-tune.sh](tuning/ubuntu-tune.sh), [tuning/run-ladder.sh](tuning/run-ladder.sh)). **Not measured**: the GPU PC's Ubuntu boot is offline |
-| 3. Networking | busy polling (`SO_BUSY_POLL`), `io_uring` (implemented), AF_XDP if the NIC supports it | Busy-poll and io_uring paths are implemented; laptop numbers are VM-bound. NIC check ([tuning/check-nic.sh](tuning/check-nic.sh)) still to run on the GPU PC. AF_XDP not implemented |
+| 3. Networking | busy polling (`SO_BUSY_POLL`), `io_uring`, AF_XDP | All three are implemented. AF_XDP is **measured** on a veth pair in generic mode (p50 kernel stamp → user space 1.76 → 0.63 µs). Native/zero-copy needs the NIC check ([tuning/check-nic.sh](tuning/check-nic.sh)) on the GPU PC, still to run |
 | 4. Cloud server near the exchange | Optional | Not started. Needs approval and a cost estimate |
 
 ## Paper trading
@@ -206,17 +233,19 @@ latency is shown separately.
 
 ## Tests
 
-- **Engine:** 61 GoogleTest cases covering parsing, the book against a `std::map` reference, the matching
+- **Engine:** 72 GoogleTest cases covering parsing, the book against a `std::map` reference, the matching
   engine's quantity conservation, the paper exchange's queue model, WebSocket framing, Bitstamp resync,
-  the shm seqlock and the paper-only guard. They pass under gcc-14 and clang-18 release builds, and under
-  ASan+UBSan and TSan.
+  IEX pcap/pcapng and DEEP books, the shm seqlock and the paper-only guard. They pass under gcc-14 and
+  clang-18 release builds, and under ASan+UBSan and TSan. The AF_XDP end-to-end test (attach to `lo`,
+  check that only the filtered port is redirected) needs privileges, so it runs in a `--privileged`
+  container and skips on CI runners.
 - **Deterministic replay:** the same input gives the same book digest and the same order stream, with or
   without UDP packetization, and both are checked against golden digests.
-- **Fuzzing:** three libFuzzer targets (ITCH stream and MoldUDP64, Coinbase JSON, WebSocket frames). The
-  first local runs did about 10M executions with no crashes. CI fuzzes each target for 60 s.
+- **Fuzzing:** four libFuzzer targets (ITCH stream and MoldUDP64, Coinbase JSON, WebSocket frames, IEX
+  captures and segments). The first local runs did about 10M executions with no crashes. CI fuzzes each
+  target for 60 s.
 - **Other suites:** Go telemetry tests run under `-race`, and Worker tests use `node --test`. CI is in
-  [.github/workflows/ci.yml](.github/workflows/ci.yml). It hasn't run on GitHub yet, because the repo
-  isn't pushed.
+  [.github/workflows/ci.yml](.github/workflows/ci.yml) and runs on every push.
 
 Bugs the tests and live runs caught:
 
@@ -227,8 +256,8 @@ Bugs the tests and live runs caught:
 
 ## Honest limits
 
-- No FPGA, no colocation, no kernel-bypass NIC (Solarflare/ef_vi, DPDK). The fastest receive path here is
-  a busy-polled socket or io_uring.
+- No FPGA, no colocation, no kernel-bypass NIC (Solarflare/ef_vi, DPDK). AF_XDP is the closest thing here,
+  and so far it has only run in generic (copy) mode on a veth pair.
 - Every benchmark number so far comes from a 2P+4E laptop inside a VM. Clean numbers need the tuned Ubuntu box.
 - The always-on live demo runs on a shared iMac in low-CPU mode (it sleeps in `poll()` when idle). Its latency
   histogram shows that setup, not the engine's best case.
@@ -236,7 +265,11 @@ Bugs the tests and live runs caught:
   mostly from fees.
 - ITCH order books cover a fixed $327 window per symbol at one-cent ticks. Orders outside it are counted
   but not laddered, and sub-penny stocks aren't supported.
-- IEX historical captures (DEEP/TOPS pcap) aren't implemented yet; only NASDAQ ITCH is replayed.
+- IEX replay builds books and measures the feed handler, but doesn't drive the strategy or the paper
+  exchange; only NASDAQ ITCH goes end to end. Its DEEP books skip sub-penny levels, and it hasn't been
+  run on a real IEX day yet.
+- AF_XDP packets carry an XDP-hook stamp, not a NIC hardware stamp, and the MONOTONIC→REALTIME offset is
+  resampled four times a second. Time-sync steps between samples show up as outliers.
 - The JSON feed handlers rely on the venues' documented field order. Fuzzing shows they fail safe, but a
   format change would surface as malformed-message counts, not as wrong prices.
 
@@ -258,6 +291,18 @@ tools/dbuild.sh "/build/rel/bench_pipeline --messages 5000000 --cpu 3"
 
 ```bash
 DOCKER_EXTRA=--privileged tools/dbuild.sh "/src/tools/run_udp_bench.sh /build/rel spin demo 20000 500000"
+```
+
+Socket vs AF_XDP over a veth pair (needs a privileged container):
+
+```bash
+DOCKER_EXTRA=--privileged tools/dbuild.sh "/src/tools/xdp_veth_bench.sh /build/rel"
+```
+
+IEX DEEP replay: a synthetic capture, or a gunzipped IEX HIST file:
+
+```bash
+tools/dbuild.sh "/build/rel/iex_replay --synth /tmp/deep.pcap --messages 2000000 && /build/rel/iex_replay --file /tmp/deep.pcap --top 5"
 ```
 
 Live Bitstamp engine, paper exchange and telemetry (local stream at `127.0.0.1:8090/snapshot`):

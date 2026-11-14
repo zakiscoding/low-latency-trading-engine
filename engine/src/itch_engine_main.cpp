@@ -2,7 +2,8 @@
 // paper exchange. One pinned thread does everything on the hot path.
 //
 //   itch_engine --listen 127.0.0.1:31001 --exchange 127.0.0.1:31002 --locates 1,2,3,4
-//               [--cpu 2] [--rx spin|blocking|uring] [--busy-poll-us 50]
+//               [--cpu 2] [--rx spin|blocking|uring|xdp] [--busy-poll-us 50]
+//               [--xdp-if eth0 --xdp-queue 0 --xdp-mode skb|drv|zerocopy]
 //               [--shm /dev/shm/lle-telemetry] [--control /dev/shm/lle-control]
 //               [--duration-s 0] [--json out.json] [--no-timing]
 //
@@ -11,6 +12,7 @@
 //    tick-to-trade: packet in user space -> send() returned
 //  - kernel_rx_to_send: SO_TIMESTAMPING software RX stamp -> send() returned
 //  - kernel_rx_to_tx:   SO_TIMESTAMPING RX stamp -> TX software stamp (when available)
+// With --rx xdp the "kernel RX" stamp is taken at the XDP hook instead (earlier).
 #include <unistd.h>
 
 #include <array>
@@ -25,6 +27,7 @@
 #include "lle/safety.hpp"
 #include "lle/shm.hpp"
 #include "lle/telemetry_sink.hpp"
+#include "lle/xdp.hpp"
 
 using namespace lle;
 
@@ -54,6 +57,14 @@ void apply_control(shm::ControlBlock* cb, ItchEngine<MarketBook, net::Sender, Pr
                static_cast<long long>(rl.max_position));
 }
 
+// Either the socket receiver or the AF_XDP one. The branch is fixed for the whole
+// run, so it is perfectly predicted.
+struct AnyRx {
+  std::unique_ptr<net::Receiver> sock;
+  std::unique_ptr<xdp::XdpReceiver> xsk;
+  LLE_ALWAYS_INLINE bool poll(net::Packet& p) noexcept { return xsk ? xsk->poll(p) : sock->poll(p); }
+};
+
 }  // namespace
 
 int main(int argc, char** argv, char** envp) {
@@ -65,7 +76,9 @@ int main(int argc, char** argv, char** envp) {
   safety::require_allowed("udp://" + exch);
   const auto locs = a.locates("locates", 4);
   const int cpu = static_cast<int>(a.num("cpu", -1));
-  const net::RxMode mode = net::parse_mode(a.str("rx", "spin"));
+  const std::string rx_name = a.str("rx", "spin");
+  const bool use_xdp = rx_name == "xdp";
+  const net::RxMode mode = use_xdp ? net::RxMode::Spin : net::parse_mode(rx_name);
 
   if (cpu >= 0 && !pin_to_cpu(cpu)) std::fprintf(stderr, "warning: could not pin to cpu %d\n", cpu);
   const bool locked = lock_memory();
@@ -79,7 +92,19 @@ int main(int argc, char** argv, char** envp) {
   const bool rx_ts = net::enable_timestamps(rxfd, false);
   bool busy = false;
   if (a.num("busy-poll-us", 0) > 0) busy = net::enable_busy_poll(rxfd, static_cast<int>(a.num("busy-poll-us")));
-  net::Receiver rx(rxfd, mode);
+  AnyRx rx;
+  std::string rx_desc = rx_name;
+  if (use_xdp) {
+    xdp::Config xc;
+    xc.ifname = a.str("xdp-if", "eth0");
+    xc.queue = static_cast<int>(a.num("xdp-queue", 0));
+    xc.udp_port = ntohs(la.sin_port);
+    xc.mode = xdp::parse_mode(a.str("xdp-mode", "skb"));
+    rx.xsk = std::make_unique<xdp::XdpReceiver>(xc);
+    rx_desc = std::string("xdp/") + rx.xsk->mode_name() + "@" + xc.ifname + ":" + std::to_string(xc.queue);
+  } else {
+    rx.sock = std::make_unique<net::Receiver>(rxfd, mode);
+  }
   net::Sender tx(net::parse_hostport(exch), /*tx_timestamps=*/true);
   net::set_nonblocking(tx.fd());
 
@@ -106,7 +131,7 @@ int main(int argc, char** argv, char** envp) {
 
   std::fprintf(stderr,
                "itch_engine: listen=%s exchange=%s books=%zu rx=%s rx_ts=%d busy_poll=%d mlock=%d cpu=%d tsc=%.3fGHz\n",
-               listen.c_str(), exch.c_str(), locs.size(), a.str("rx", "spin").c_str(), rx_ts, busy, locked, cpu,
+               listen.c_str(), exch.c_str(), locs.size(), rx_desc.c_str(), rx_ts, busy, locked, cpu,
                clk.ticks_per_ns);
 
   Histogram h_kernel_to_send, h_kernel_to_tx, h_kernel_to_user;
@@ -176,6 +201,7 @@ int main(int argc, char** argv, char** envp) {
     if (now - last_stats > one_sec / 4) {
       tel.stats(static_cast<std::int64_t>(eng.counters().messages), static_cast<std::int64_t>(eng.counters().orders),
                 static_cast<std::int64_t>(fills), static_cast<std::int64_t>(eng.counters().risk_rejects), eng.position(0));
+      if (rx.xsk) rx.xsk->resync_clock();
       last_stats = now;
     }
     if (dur && now - start > dur) break;
@@ -203,7 +229,7 @@ int main(int argc, char** argv, char** envp) {
   if (!a.str("json").empty()) {
     std::ofstream f(a.str("json"));
     f << "{\"bench\":\"udp_tick_to_trade\",\"label\":\"" << a.str("label") << "\",\"cpu\":\"" << cpu_model()
-      << "\",\"rx\":\"" << a.str("rx", "spin") << "\",\"busy_poll\":" << busy << ",\"pinned_cpu\":" << cpu
+      << "\",\"rx\":\"" << rx_desc << "\",\"busy_poll\":" << busy << ",\"pinned_cpu\":" << cpu
       << ",\"packets\":" << packets << ",\"orders\":" << c.orders << ",\"stages\":" << stages_json(eng.hists(), clk, true)
       << ",\"kernel_rx_to_user\":" << hist_json(h_kernel_to_user, nullptr)
       << ",\"kernel_rx_to_send\":" << hist_json(h_kernel_to_send, nullptr)
