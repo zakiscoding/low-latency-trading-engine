@@ -3,6 +3,7 @@
  "laptop/compiler_o2.json",
  "laptop/compiler_o3n.json",
  "laptop/compiler_pgo.json",
+ "laptop/iex_synth_deep.json",
  "laptop/optimization_ladder.json",
  "laptop/pipeline_itch_real.json",
  "laptop/udp_blocking.exchange.json",
@@ -10,5 +11,11 @@
  "laptop/udp_spin.exchange.json",
  "laptop/udp_spin.json",
  "laptop/udp_uring.exchange.json",
- "laptop/udp_uring.json"
+ "laptop/udp_uring.json",
+ "laptop/veth_spin.exchange.json",
+ "laptop/veth_spin.json",
+ "laptop/veth_uring.exchange.json",
+ "laptop/veth_uring.json",
+ "laptop/veth_xdp.exchange.json",
+ "laptop/veth_xdp.json"
 ]

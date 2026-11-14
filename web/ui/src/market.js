@@ -1,5 +1,6 @@
 // Live market stream: snapshot then deltas over one WebSocket, with reconnect.
 import { useEffect, useRef, useState } from "react";
+import { emptyCandles, fold, fromServer } from "./candles.js";
 
 function applyLevels(levels, changes, desc) {
   const m = new Map(levels);
@@ -17,15 +18,27 @@ function mergeBuckets(buckets, add) {
 }
 
 export function reduce(state, msg) {
+  if (msg.t === "candles") return { ...(state ?? {}), candles: fold(fromServer(msg), state?.trades) };
   if (msg.t === "snap")
-    return { ...msg, bids: msg.bids ?? [], asks: msg.asks ?? [], trades: msg.trades ?? [], fills: msg.fills ?? [], connected: true };
+    return {
+      ...msg,
+      bids: msg.bids ?? [],
+      asks: msg.asks ?? [],
+      trades: msg.trades ?? [],
+      fills: msg.fills ?? [],
+      connected: true,
+      candles: fold(state?.candles ?? emptyCandles(), msg.trades),
+    };
   if (msg.t === "offline") return { ...(state ?? {}), offline: true, connected: true };
   if (msg.t === "upstream") return state ? { ...state, upstream: msg.up } : state;
   if (msg.t !== "d" || !state || !state.meta) return state;
   const s = { ...state, upstream: true, seq: msg.seq, ts: msg.ts };
   s.bids = applyLevels(state.bids ?? [], msg.bids, true);
   s.asks = applyLevels(state.asks ?? [], msg.asks, false);
-  if (msg.trades?.length) s.trades = [...(state.trades ?? []), ...msg.trades].slice(-60);
+  if (msg.trades?.length) {
+    s.trades = [...(state.trades ?? []), ...msg.trades].slice(-60);
+    s.candles = fold(state.candles ?? emptyCandles(), msg.trades);
+  }
   if (msg.fills?.length) s.fills = [...(state.fills ?? []), ...msg.fills].slice(-40);
   if (msg.lat_add?.length) {
     const t = { ...(state.latency?.tick_to_trade ?? {}) };
@@ -68,7 +81,11 @@ export function useMarket() {
     // Show the edge-cached snapshot immediately, then go live.
     fetch("/api/snapshot")
       .then((r) => r.json())
-      .then((m) => setState((s) => s ?? reduce(null, m)))
+      .then((m) => setState((s) => (s?.meta ? s : reduce(s, m))))
+      .catch(() => {});
+    fetch("/api/candles")
+      .then((r) => r.json())
+      .then((j) => setState((s) => reduce(s, { ...j, t: "candles" })))
       .catch(() => {});
     connect();
     return () => {

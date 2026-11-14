@@ -184,9 +184,16 @@ int main(int argc, char** argv, char** envp) {
       eng.h[cParseApply].record(t1 - t0);
       eng.after_message(t1, krx);
       t_prev_end = rdtsc_unordered();
-      if (eng.sent_this_msg && krx) {
-        const std::int64_t d = clock_ns(CLOCK_REALTIME) - krx;
-        if (d > 0) h_k2s.record(static_cast<std::uint64_t>(d));
+      // Publish the in-process sample for every order. The wire number needs a
+      // kernel RX stamp, which macOS doesn't provide (krx == 0): it is sent as 0
+      // there. (Before, nothing was published without a stamp, so the iMac's live
+      // histograms stayed empty.)
+      if (eng.sent_this_msg) {
+        std::int64_t d = 0;
+        if (krx) {
+          d = clock_ns(CLOCK_REALTIME) - krx;
+          if (d > 0) h_k2s.record(static_cast<std::uint64_t>(d));
+        }
         tel.flush_latency(d);
       }
     });

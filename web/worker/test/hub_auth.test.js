@@ -88,3 +88,24 @@ test("github profile: token used once, id hashed, no token kept", async () => {
   assert.equal(JSON.stringify(u).includes("hidden@"), false);
   assert.equal(calls.length, 2);
 });
+
+test("candles: 1-minute OHLCV from trades, each trade counted once", async () => {
+  const { foldCandle, candlesView } = await import("../src/hubstate.js");
+  const h = emptyHub();
+  const m = 60_000 * 1e6; // one minute in ns
+  const t0 = 1_700_000_040_000 * 1e6; // a minute boundary, in ns
+  applyUpstream(h, { t: "snap", seq: 1, bids: [], asks: [], trades: [{ ts: t0 + 1, p: 100, q: 2, s: "a" }] });
+  applyUpstream(h, { t: "d", seq: 2, trades: [{ ts: t0 + 5, p: 105, q: 1, s: "a" }, { ts: t0 + 9, p: 98, q: 3, s: "b" }] });
+  // The next snapshot repeats a trade already counted.
+  applyUpstream(h, { t: "snap", seq: 3, bids: [], asks: [], trades: [{ ts: t0 + 9, p: 98, q: 3, s: "b" }] });
+  assert.deepEqual(h.candles, [[t0 / 1e6, 100, 105, 98, 98, 6]]);
+  // Same timestamp, different trade: counted.
+  assert.equal(foldCandle(h, { ts: t0 + 9, p: 99, q: 1, s: "a" }), false);
+  assert.equal(h.candles[0][5], 7);
+  // Next minute starts a new bar; a late trade for the closed bar is dropped.
+  assert.equal(foldCandle(h, { ts: t0 + m + 1, p: 101, q: 1, s: "a" }), true);
+  assert.equal(foldCandle(h, { ts: t0 + 2, p: 500, q: 1, s: "a" }), false);
+  assert.equal(h.candles.length, 2);
+  assert.equal(h.candles[0][2], 105);
+  assert.equal(candlesView(h).tf_ms, 60_000);
+});

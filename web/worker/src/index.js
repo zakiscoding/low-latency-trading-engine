@@ -3,6 +3,8 @@
 //   /                 static UI (Workers static assets), no login
 //   /ws               live market view (MarketHub DO fan-out)
 //   /api/snapshot     latest view as JSON, cached at the edge for 2 s
+//   /api/candles      1-minute OHLCV bars from the engine's trades, cached 5 s
+//   /api/metrics      per-minute engine metrics and fill markouts, cached 5 s
 //   /api/leaderboard  weekly paper P&L, cached 30 s
 //   /auth/*           GitHub / Google OAuth (Turnstile first), session cookie
 //   /api/account|order|cancel|reset|privacy|delete   signed-in paper accounts
@@ -79,6 +81,12 @@ export async function handle(request, env, ctx) {
   }
   if (path === "/api/snapshot") {
     return cachedJson(request, ctx, 2, async () => (await hub(env).fetch("https://hub/snapshot")).json());
+  }
+  if (path === "/api/metrics") {
+    return cachedJson(request, ctx, 5, async () => (await hub(env).fetch("https://hub/metrics")).json());
+  }
+  if (path === "/api/candles") {
+    return cachedJson(request, ctx, 5, async () => (await hub(env).fetch("https://hub/candles")).json());
   }
   if (path === "/api/leaderboard") {
     const lb = env.LEADERBOARD.get(env.LEADERBOARD.idFromName("global"));
