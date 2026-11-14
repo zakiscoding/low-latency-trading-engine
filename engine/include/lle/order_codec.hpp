@@ -72,11 +72,11 @@ struct OrderMsgView {
   std::uint64_t account() const noexcept { return load_be<std::uint64_t>(p + ord::kAccount); }
 };
 
-// Exchange -> engine execution report (32 bytes).
+// Exchange -> engine execution report (40 bytes).
 //   0 u8 type 'A' ack, 'F' fill, 'C' cancelled/expired, 'R' reject
 //   1 u8 side, 2 u8 liquidity 'M'/'T', 3 u8 reject reason
-//   4 u32 qty, 8 u64 token, 16 i64 price, 24 i64 fee (in 1e-6 quote units)
-constexpr std::size_t kExecMsgSize = 32;
+//   4 u32 qty, 8 u64 token, 16 i64 price, 24 i64 fee (micro-dollars), 32 u32 instrument
+constexpr std::size_t kExecMsgSize = 40;
 struct ExecReport {
   char type;
   Side side;
@@ -86,6 +86,7 @@ struct ExecReport {
   std::uint64_t token;
   std::int64_t price;
   std::int64_t fee_micros;
+  std::uint32_t instrument = 0;
 
   void encode(unsigned char* b) const noexcept {
     b[0] = static_cast<unsigned char>(type);
@@ -96,11 +97,13 @@ struct ExecReport {
     store_be<std::uint64_t>(b + 8, token);
     store_be<std::int64_t>(b + 16, price);
     store_be<std::int64_t>(b + 24, fee_micros);
+    store_be<std::uint32_t>(b + 32, instrument);
+    store_be<std::uint32_t>(b + 36, 0);
   }
   static ExecReport decode(const unsigned char* b) noexcept {
     return ExecReport{static_cast<char>(b[0]), b[1] == 'B' ? Side::Buy : Side::Sell, static_cast<char>(b[2]),
                       static_cast<char>(b[3]), load_be<std::uint32_t>(b + 4), load_be<std::uint64_t>(b + 8),
-                      load_be<std::int64_t>(b + 16), load_be<std::int64_t>(b + 24)};
+                      load_be<std::int64_t>(b + 16), load_be<std::int64_t>(b + 24), load_be<std::uint32_t>(b + 32)};
   }
 };
 

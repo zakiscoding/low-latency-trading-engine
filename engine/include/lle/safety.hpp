@@ -46,11 +46,22 @@ inline std::string_view host_of(std::string_view url) {
 
 enum class Verdict { Allowed, Refused };
 
+// Loopback and RFC 1918 IPv4 literals: the local paper exchange and telemetry.
+inline bool is_private_ipv4(std::string_view h) {
+  unsigned a = 0, b = 0, c = 0, d = 0;
+  char tail = 0;
+  const std::string hs(h);
+  if (std::sscanf(hs.c_str(), "%u.%u.%u.%u%c", &a, &b, &c, &d, &tail) != 4) return false;
+  if (a > 255 || b > 255 || c > 255 || d > 255) return false;
+  return a == 127 || a == 10 || (a == 172 && b >= 16 && b <= 31) || (a == 192 && b == 168);
+}
+
 inline Verdict check_endpoint(std::string_view url, std::string* why = nullptr) {
   const std::string_view h = host_of(url);
   if (h == kAlpacaPaperHost) return Verdict::Allowed;
   for (auto a : kAllowedDataHosts)
     if (h == a) return Verdict::Allowed;
+  if (is_private_ipv4(h)) return Verdict::Allowed;
   if (ends_with(h, "alpaca.markets")) {
     if (why) *why = "non-paper Alpaca host";
     return Verdict::Refused;
