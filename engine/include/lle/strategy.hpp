@@ -41,7 +41,7 @@ class ImbalanceStrategy {
     Decision d;
     if (LLE_UNLIKELY(bid == BidLadder::kNone || ask == AskLadder::kNone)) return d;
     const std::int64_t spread = ask - bid;
-    if (spread <= 0 || spread > p_.max_spread_ticks) return d;
+    if (spread <= 0 || spread > p_.max_spread_ticks) return d;  // crossed/locked book: never trade on it
     const std::int64_t tot = bid_qty + ask_qty;
     if (tot <= 0) return d;
     const std::int64_t diff = bid_qty - ask_qty;

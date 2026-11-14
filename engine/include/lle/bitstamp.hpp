@@ -4,7 +4,7 @@
 // the public web UI uses this venue.
 //
 // Channels:
-//   order_book_<pair>       top-100 snapshot every ~100 ms  -> used once to seed the book
+//   order_book_<pair>       top-100 snapshot every ~100 ms  -> replaces the book each time
 //   diff_order_book_<pair>  changed levels, absolute qty, 0 = remove
 //   live_trades_<pair>      trades; "type": 0 = buy (aggressor), 1 = sell
 // Produces the same handler callbacks as coinbase::parse, so the engine, paper
@@ -76,11 +76,15 @@ bool parse(const char* p, std::size_t n, H& h, Stats& st, State& s) noexcept {
   const bool diff = chan.rfind("diff_order_book_", 0) == 0;
   const bool trades = chan.rfind("live_trades_", 0) == 0;
   if (snap || diff) {
-    if (snap && s.seeded) return true;  // snapshots only seed (and re-seed after reset())
     const char* mt = find(p, end, "\"microtimestamp\":\"");
     std::int64_t us = 0;
     if (!mt || !parse_uint(mt, end, us)) { st.malformed++; return false; }
-    if (diff && (!s.seeded || us <= s.snapshot_us)) return true;  // not yet seeded / stale
+    // Every top-100 snapshot (~10/s) replaces the book; only diffs newer than the
+    // latest snapshot are applied. Diffs and snapshots can arrive out of order, so
+    // seeding once and trusting diffs afterwards leaves stale levels (seen live: a
+    // crossed book). This heals within one snapshot interval.
+    if (snap && us <= s.snapshot_us) return true;
+    if (diff && (!s.seeded || us <= s.snapshot_us)) return true;
     const char* b = find(p, end, "\"bids\":[");
     if (!b) { st.malformed++; return false; }
     const std::string_view product = snap ? chan.substr(11) : chan.substr(16);

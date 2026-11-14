@@ -10,6 +10,7 @@
 // SO_TIMESTAMPING RX stamp of the last segment of the message.
 #include <cstdio>
 #include <fstream>
+#include <memory>
 #include <string>
 
 #include "lle/args.hpp"
@@ -100,6 +101,7 @@ struct Engine {
         h[cBuild].record(t_built - t_dec);
         h[cSend].record(t_sent - t_built);
         h[cInproc].record(t_sent - t_msg);
+        tel.on_t2t(t_applied - t_msg, 0, t_dec - t_applied, t_built - t_dec, t_sent - t_built, t_sent - t_msg);
         orders++;
         sent_this_msg = true;
         tel.on_order(0, d.side, d.price, d.qty, token);
@@ -139,6 +141,11 @@ int main(int argc, char** argv, char** envp) {
   rl.max_orders_per_sec = static_cast<std::uint32_t>(a.num("max-orders-per-sec", 5));
   rl.price_band_ticks = 10'000;  // $100
   Engine eng(tx, tel, sp, rl, clk.ticks_per_ns);
+  std::unique_ptr<shm::Control> ctrl;
+  if (a.flag("control")) {
+    ctrl = std::make_unique<shm::Control>(a.str("control") == "1" ? "/dev/shm/lle-control" : a.str("control"), true);
+    ctrl->get()->version.fetch_add(1);  // apply the current block once at startup
+  }
 
   const Venue venue = parse_venue(a.str("venue", "bitstamp"));
   VenueFeed feed(venue, product);
@@ -183,6 +190,27 @@ int main(int argc, char** argv, char** envp) {
       break;
     }
     // Idle-side work.
+    if (ctrl && ctrl->changed()) {
+      shm::ControlBlock* cb = ctrl->get();
+      if (cb->kill.load()) eng.risk.kill(); else eng.risk.unkill();
+      eng.trading = cb->trading_enabled.load() != 0;
+      RiskLimits nl = eng.risk.limits();
+      if (cb->max_order_qty > 0) nl.max_order_qty = cb->max_order_qty;
+      if (cb->max_position > 0) nl.max_position = cb->max_position;
+      if (cb->max_orders_per_sec > 0) nl.max_orders_per_sec = static_cast<std::uint32_t>(cb->max_orders_per_sec);
+      if (cb->max_orders_per_day > 0) nl.max_orders_per_day = static_cast<std::uint32_t>(cb->max_orders_per_day);
+      if (cb->max_daily_loss_ticks > 0) nl.max_daily_loss_ticks = cb->max_daily_loss_ticks;
+      eng.risk.set_limits(nl, clk.ticks_per_ns);
+      StrategyParams np = eng.strat.params();
+      if (cb->order_qty > 0) np.order_qty = cb->order_qty;
+      if (cb->imbalance_num > 0 && cb->imbalance_den > 0) {
+        np.imbalance_num = cb->imbalance_num;
+        np.imbalance_den = cb->imbalance_den;
+      }
+      eng.strat.set_params(np);
+      std::fprintf(stderr, "control: kill=%d trading=%d max_qty=%lld max_pos=%lld\n", eng.risk.killed(), eng.trading,
+                   static_cast<long long>(nl.max_order_qty), static_cast<long long>(nl.max_position));
+    }
     for (;;) {
       const ssize_t n = ::recv(tx.fd(), exec_buf, sizeof(exec_buf), MSG_DONTWAIT);
       if (n < static_cast<ssize_t>(kExecMsgSize)) break;
