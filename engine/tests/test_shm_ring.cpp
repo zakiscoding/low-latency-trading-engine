@@ -57,6 +57,7 @@ TEST(ShmRing, ConcurrentReaderSeesNoTornRecords) {
 }
 
 TEST(ShmControl, VersionChangeIsSeen) {
+  ::unlink("/tmp/lle-test-ctl");  // a leftover file from an earlier run already has version > 0
   Control w("/tmp/lle-test-ctl", true);
   Control rd("/tmp/lle-test-ctl", false);
   EXPECT_FALSE(rd.changed());

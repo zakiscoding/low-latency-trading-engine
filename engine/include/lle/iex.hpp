@@ -82,10 +82,12 @@ class CaptureReader {
           if (code == 0) break;
           if (code == 9 && olen >= 1) {
             const unsigned r = o[4];
+            // Power-of-ten resolutions only, 10^0..10^9 s; finer ones are clamped to
+            // 1 ns (a fuzzer found the unbounded loop overflowing int64).
             if (!(r & 0x80)) {
               std::int64_t div = 1;
-              for (unsigned i = 0; i < r; ++i) div *= 10;
-              tsres_ns_ = div >= 1'000'000'000 ? 1 : 1'000'000'000 / div;
+              for (unsigned i = 0; i < r && i < 9; ++i) div *= 10;
+              tsres_ns_ = 1'000'000'000 / div;
             }
           }
           o += 4 + ((olen + 3u) & ~3u);
