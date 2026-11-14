@@ -1,0 +1,128 @@
+{
+ "bench": "optimization_ladder",
+ "machine": "laptop",
+ "rows": [
+  {
+   "step": "v0_naive",
+   "change": "Baseline: std::map book, allocate+decode each message, text order build",
+   "runs": 3,
+   "p50": 762,
+   "p99": 5332,
+   "p999": 59896,
+   "book_p50": 48,
+   "book_p99": 986,
+   "msgs_per_sec": 2077690,
+   "throughput": "2.08M msg/s"
+  },
+  {
+   "step": "v1_flat_book",
+   "change": "Flat price-level arrays + preallocated order pool (Fibonacci-hashed order map)",
+   "runs": 3,
+   "p50": 704,
+   "p99": 5076,
+   "p999": 52512,
+   "book_p50": 124,
+   "book_p99": 743,
+   "msgs_per_sec": 2461400,
+   "throughput": "2.46M msg/s"
+  },
+  {
+   "step": "v2_inplace_parse",
+   "change": "Zero-copy in-place ITCH parsing",
+   "runs": 3,
+   "p50": 653,
+   "p99": 7281,
+   "p999": 68922,
+   "book_p50": 118,
+   "book_p99": 730,
+   "msgs_per_sec": 3550890,
+   "throughput": "3.55M msg/s"
+  },
+  {
+   "step": "v3_preserialized",
+   "change": "Pre-serialized order templates (patch 4 fields, send)",
+   "runs": 3,
+   "p50": 400,
+   "p99": 1640,
+   "p999": 31178,
+   "book_p50": 118,
+   "book_p99": 723,
+   "msgs_per_sec": 3435430,
+   "throughput": "3.44M msg/s"
+  },
+  {
+   "step": "v4_identity_hash",
+   "change": "Identity hash for order refs: live orders stay in a cache-friendly window",
+   "runs": 3,
+   "p50": 310,
+   "p99": 1525,
+   "p999": 27896,
+   "book_p50": 31,
+   "book_p99": 634,
+   "msgs_per_sec": 4629850,
+   "throughput": "4.63M msg/s"
+  },
+  {
+   "step": "v5_hugepages",
+   "change": "Transparent huge pages + prefaulted tables",
+   "runs": 3,
+   "p50": 316,
+   "p99": 1614,
+   "p999": 32409,
+   "book_p50": 31,
+   "book_p99": 647,
+   "msgs_per_sec": 4320660,
+   "throughput": "4.32M msg/s"
+  },
+  {
+   "step": "compiler:o2",
+   "change": "-O2, generic x86-64-v2, no LTO",
+   "runs": 3,
+   "p50": 381,
+   "p99": 1794,
+   "p999": 40614,
+   "book_p50": 36,
+   "book_p99": 711,
+   "msgs_per_sec": 3883020,
+   "throughput": "3.88M msg/s"
+  },
+  {
+   "step": "compiler:o3n",
+   "change": "-O3 -march=native",
+   "runs": 3,
+   "p50": 377,
+   "p99": 1717,
+   "p999": 41025,
+   "book_p50": 35,
+   "book_p99": 704,
+   "msgs_per_sec": 4101800,
+   "throughput": "4.10M msg/s"
+  },
+  {
+   "step": "compiler:lto",
+   "change": "+ link-time optimization",
+   "runs": 3,
+   "p50": 397,
+   "p99": 2127,
+   "p999": 50460,
+   "book_p50": 37,
+   "book_p99": 736,
+   "msgs_per_sec": 2917790,
+   "throughput": "2.92M msg/s"
+  },
+  {
+   "step": "compiler:pgo",
+   "change": "+ PGO (trained on synthetic data, measured on the real file)",
+   "runs": 3,
+   "p50": 393,
+   "p99": 2076,
+   "p999": 50871,
+   "book_p50": 38,
+   "book_p99": 730,
+   "msgs_per_sec": 2662130,
+   "throughput": "2.66M msg/s"
+  }
+ ],
+ "title": "In-process tick-to-trade on 18,487,862 real NASDAQ ITCH messages (8 most active symbols)",
+ "cpu": "12th Gen Intel(R) Core(TM) i3-1215U"
+}

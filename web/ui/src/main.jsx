@@ -113,7 +113,7 @@ function useResults() {
 function BenchTables() {
   const res = useResults();
   const ladder = res.filter((r) => r.bench === "optimization_ladder");
-  const pipe = res.filter((r) => r.bench === "pipeline");
+  const pipe = []; // raw per-repeat runs are summarized in optimization_ladder.json
   const udp = res.filter((r) => r.bench === "udp_tick_to_trade");
   if (!res.length) return <p className="note">No benchmark results bundled.</p>;
   return (
@@ -184,7 +184,10 @@ function BenchTables() {
       ))}
       {udp.length > 0 && (
         <>
-          <p className="note">UDP replay, kernel RX timestamp → order send() returned</p>
+          <p className="note">
+            UDP replay on loopback, kernel RX timestamp → order send() returned. Laptop numbers are inside a Hyper-V VM
+            (Docker Desktop) and are dominated by VM scheduling; clean runs on the tuned Ubuntu box are pending.
+          </p>
           <table>
             <thead>
               <tr>
@@ -198,7 +201,7 @@ function BenchTables() {
               </tr>
             </thead>
             <tbody>
-              {udp.map((u) => (
+              {udp.filter((u) => u.kernel_rx_to_send).map((u) => (
                 <tr key={u.file}>
                   <td>{u.label || u.file}</td>
                   <td>{u.rx}</td>

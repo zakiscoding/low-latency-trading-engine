@@ -1,1 +1,14 @@
-[]
+[
+ "laptop/compiler_lto.json",
+ "laptop/compiler_o2.json",
+ "laptop/compiler_o3n.json",
+ "laptop/compiler_pgo.json",
+ "laptop/optimization_ladder.json",
+ "laptop/pipeline_itch_real.json",
+ "laptop/udp_blocking.exchange.json",
+ "laptop/udp_blocking.json",
+ "laptop/udp_spin.exchange.json",
+ "laptop/udp_spin.json",
+ "laptop/udp_uring.exchange.json",
+ "laptop/udp_uring.json"
+]
