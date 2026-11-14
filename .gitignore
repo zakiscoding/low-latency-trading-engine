@@ -1,0 +1,21 @@
+build/
+/out/
+*.profraw
+*.profdata
+*.gcda
+.env
+.env.*
+!.env.example
+# Raw market data is never committed (licensing + size).
+data/
+*.itch
+*.itch.gz
+*NASDAQ_ITCH50*
+*.pcap
+*.pcap.gz
+*.pcapng
+node_modules/
+web/ui/dist/
+.wrangler/
+.dev.vars
+telemetry/telemetry
