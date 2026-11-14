@@ -12,6 +12,7 @@
 #include <cstring>
 
 #include "lle/common.hpp"
+#include "lle/memory.hpp"
 
 namespace lle {
 
@@ -29,13 +30,13 @@ class PriceLadder {
 
   explicit PriceLadder(std::uint32_t levels_log2 = 15) : n_(1u << levels_log2) {
     assert(levels_log2 >= 12 && levels_log2 <= 24);
-    levels_ = static_cast<Level*>(std::aligned_alloc(kCacheLine, sizeof(Level) * n_));
+    levels_ = static_cast<Level*>(table_alloc(sizeof(Level) * n_));
     words_ = static_cast<std::uint64_t*>(std::aligned_alloc(kCacheLine, bytes_rounded(nwords() * 8)));
     summary_ = static_cast<std::uint64_t*>(std::aligned_alloc(kCacheLine, bytes_rounded(nsum() * 8)));
     clear();
   }
   ~PriceLadder() {
-    std::free(levels_);
+    table_free(levels_, sizeof(Level) * n_);
     std::free(words_);
     std::free(summary_);
   }

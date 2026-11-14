@@ -12,8 +12,8 @@
 using namespace lle;
 
 #ifndef LLE_GOLDEN_BOOK
-#define LLE_GOLDEN_BOOK 0x52e9c5519d911739ull
-#define LLE_GOLDEN_ORDERS 0xba706674f3560447ull
+#define LLE_GOLDEN_BOOK 0x5cdcf435dc2cfe58ull
+#define LLE_GOLDEN_ORDERS 0x1cb76f7f1d71cf61ull
 #endif
 
 namespace {

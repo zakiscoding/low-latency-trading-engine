@@ -12,6 +12,7 @@
 #include <stdexcept>
 
 #include "lle/common.hpp"
+#include "lle/memory.hpp"
 
 namespace lle {
 
@@ -19,12 +20,19 @@ class OrderIdMap {
  public:
   static constexpr std::uint32_t kEmpty = 0xFFFFFFFFu;
 
-  explicit OrderIdMap(std::uint32_t capacity_log2) : mask_((1ull << capacity_log2) - 1), shift_(64 - capacity_log2) {
-    e_ = static_cast<Entry*>(std::aligned_alloc(kCacheLine, sizeof(Entry) * (mask_ + 1)));
-    if (!e_) throw std::bad_alloc();
+  // Identity hashing (slot = low bits of the id) suits exchange order refs, which
+  // are assigned in increasing order: live orders cluster in a sliding window of
+  // the table instead of being scattered across it, so lookups hit cache.
+  // Fibonacci hashing is the general-purpose fallback for ids with no such order.
+  enum class Hash : std::uint8_t { Identity, Fibonacci };
+  static inline Hash default_hash = Hash::Identity;
+
+  explicit OrderIdMap(std::uint32_t capacity_log2, Hash h = default_hash)
+      : mask_((1ull << capacity_log2) - 1), shift_(64 - capacity_log2), hash_(h) {
+    e_ = static_cast<Entry*>(table_alloc(sizeof(Entry) * (mask_ + 1)));
     for (std::uint64_t i = 0; i <= mask_; ++i) e_[i] = Entry{0, kEmpty, 0};
   }
-  ~OrderIdMap() { std::free(e_); }
+  ~OrderIdMap() { table_free(e_, sizeof(Entry) * (mask_ + 1)); }
   OrderIdMap(const OrderIdMap&) = delete;
   OrderIdMap& operator=(const OrderIdMap&) = delete;
 
@@ -86,13 +94,13 @@ class OrderIdMap {
     std::uint32_t val;
     std::uint32_t pad;
   };
-  // Fibonacci hashing: ITCH order refs are dense and increasing, which this spreads well.
   LLE_ALWAYS_INLINE std::uint64_t slot(std::uint64_t key) const noexcept {
-    return (key * 0x9E3779B97F4A7C15ull) >> shift_;
+    return hash_ == Hash::Identity ? (key & mask_) : ((key * 0x9E3779B97F4A7C15ull) >> shift_);
   }
   Entry* e_ = nullptr;
   std::uint64_t mask_;
   int shift_;
+  Hash hash_;
   std::uint64_t size_ = 0;
 };
 
@@ -101,13 +109,11 @@ template <class T>
 class Pool {
  public:
   explicit Pool(std::uint32_t capacity) : cap_(capacity) {
-    items_ = static_cast<Slot*>(std::aligned_alloc(kCacheLine, ((sizeof(Slot) * cap_ + 63) / 64) * 64));
-    if (!items_) throw std::bad_alloc();
-    std::memset(static_cast<void*>(items_), 0, sizeof(Slot) * cap_);
+    items_ = static_cast<Slot*>(table_alloc(sizeof(Slot) * cap_));
     for (std::uint32_t i = 0; i < cap_; ++i) items_[i].next_free = i + 1;
     free_ = 0;
   }
-  ~Pool() { std::free(items_); }
+  ~Pool() { table_free(items_, sizeof(Slot) * cap_); }
   Pool(const Pool&) = delete;
   Pool& operator=(const Pool&) = delete;
 

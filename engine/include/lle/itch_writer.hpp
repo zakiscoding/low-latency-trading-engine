@@ -88,6 +88,7 @@ struct SynthConfig {
   std::uint64_t messages = 1'000'000;
   std::uint32_t start_price = 1'000'000;  // $100.0000 in ITCH units
   int depth_ticks = 40;                    // adds land within this many ticks of the touch
+  std::size_t target_live = 2000;          // resting orders per symbol the flow hovers around
 };
 
 // Generates `messages` messages. Locates are 1..symbols.
@@ -124,7 +125,8 @@ inline std::vector<unsigned char> synth_day(const SynthConfig& cfg) {
     const std::uint16_t loc = static_cast<std::uint16_t>(si + 1);
     if (u(rng) < 0.002) s.mid += (rng() & 1) ? 1 : -1;  // slow drift
     const double r = u(rng);
-    if (s.live.size() < 20 || r < 0.45) {
+    const double p_add = s.live.size() < cfg.target_live ? 0.50 : 0.30;  // mean-reverting depth
+    if (s.live.size() < 20 || r < p_add) {
       const Side side = (rng() & 1) ? Side::Buy : Side::Sell;
       const int d = std::min(dist(rng), cfg.depth_ticks);
       const std::int64_t px = side == Side::Buy ? s.mid - 1 - d : s.mid + 1 + d;
@@ -132,7 +134,7 @@ inline std::vector<unsigned char> synth_day(const SynthConfig& cfg) {
       const std::uint64_t ref = next_ref++;
       w.add(loc, ts, ref, side, sh, s.name.c_str(), static_cast<std::uint32_t>(px * 100));
       s.live.push_back({ref, side, static_cast<std::uint32_t>(px * 100), sh});
-    } else if (r < 0.80) {
+    } else if (r < p_add + 0.35) {
       const std::size_t k = rng() % s.live.size();
       if (u(rng) < 0.85) {
         w.del(loc, ts, s.live[k].ref);
@@ -144,7 +146,7 @@ inline std::vector<unsigned char> synth_day(const SynthConfig& cfg) {
         s.live[k].shares -= c;
         if (s.live[k].shares == 0) { s.live[k] = s.live.back(); s.live.pop_back(); }
       }
-    } else if (r < 0.92) {
+    } else if (r < p_add + 0.47) {
       // Execute against the best order on a random side.
       const Side side = (rng() & 1) ? Side::Buy : Side::Sell;
       std::size_t best = s.live.size();
