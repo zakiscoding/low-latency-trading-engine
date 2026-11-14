@@ -43,10 +43,33 @@ class PriceLadder {
   PriceLadder(const PriceLadder&) = delete;
   PriceLadder& operator=(const PriceLadder&) = delete;
 
+  // Empties the side. Cost is proportional to the occupied levels, not the window:
+  // L2 venues replace the whole book on every snapshot (Bitstamp: 10/s), and a full
+  // memset of a 2^18-level window was ~4 MB of stores each time.
   void clear() noexcept {
-    std::memset(levels_, 0, sizeof(Level) * n_);
-    std::memset(words_, 0, nwords() * 8);
-    std::memset(summary_, 0, nsum() * 8);
+    if (!cleared_once_) {
+      std::memset(levels_, 0, sizeof(Level) * n_);
+      std::memset(words_, 0, nwords() * 8);
+      std::memset(summary_, 0, nsum() * 8);
+      cleared_once_ = true;
+    } else {
+      const std::uint32_t ns = nsum();
+      for (std::uint32_t s = 0; s < ns; ++s) {
+        std::uint64_t sb = summary_[s];
+        while (sb) {
+          const std::uint32_t w = (s << 6) + static_cast<std::uint32_t>(std::countr_zero(sb));
+          sb &= sb - 1;
+          std::uint64_t bits = words_[w];
+          while (bits) {
+            const std::uint32_t i = (w << 6) + static_cast<std::uint32_t>(std::countr_zero(bits));
+            bits &= bits - 1;
+            levels_[i] = Level{};
+          }
+          words_[w] = 0;
+        }
+        summary_[s] = 0;
+      }
+    }
     best_ = -1;
     based_ = false;
   }
@@ -255,6 +278,7 @@ class PriceLadder {
   std::int32_t best_ = -1;
   bool based_ = false;
   std::uint64_t recenters_ = 0;
+  bool cleared_once_ = false;
 };
 
 using BidLadder = PriceLadder<true>;

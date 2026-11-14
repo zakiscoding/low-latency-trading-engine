@@ -94,3 +94,20 @@ void fuzz_against_map(std::uint64_t seed) {
 
 TEST(Ladder, RandomBidMatchesMap) { fuzz_against_map<true>(7); }
 TEST(Ladder, RandomAskMatchesMap) { fuzz_against_map<false>(8); }
+
+// clear() walks the bitmap instead of zeroing the whole window: everything must
+// really be gone (levels, bits, best) and the ladder reusable at a new price.
+TEST(Ladder, ClearIsCompleteAndReusable) {
+  AskLadder a(16);
+  for (int round = 0; round < 3; ++round) {
+    const std::int64_t base = 1'000'000 + round * 50'000;
+    for (int i = 0; i < 5000; i += 7) a.set(base + i, 1 + i);
+    EXPECT_EQ(a.best_price(), base);
+    a.clear();
+    EXPECT_TRUE(a.empty());
+    for (int i = 0; i < 5000; i += 7) EXPECT_EQ(a.qty_at(base + i), 0);
+    int n = 0;
+    a.for_each_level(1 << 20, [&](std::int64_t, std::int64_t, std::uint32_t) { n++; });
+    EXPECT_EQ(n, 0);
+  }
+}
