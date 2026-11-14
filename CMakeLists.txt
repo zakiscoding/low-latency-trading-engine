@@ -72,7 +72,7 @@ if(LLE_URING)
 endif()
 
 # ---- binaries (one .cpp each) ----
-set(LLE_BINS itch_engine itch_replay itch_synth paper_exchange coinbase_engine recorder)
+set(LLE_BINS itch_engine itch_replay itch_synth paper_exchange crypto_engine recorder)
 foreach(t ${LLE_BINS})
   if(EXISTS ${CMAKE_SOURCE_DIR}/engine/src/${t}_main.cpp)
     add_executable(${t} engine/src/${t}_main.cpp)

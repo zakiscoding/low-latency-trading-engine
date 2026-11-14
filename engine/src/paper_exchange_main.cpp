@@ -5,7 +5,7 @@
 //
 //   paper_exchange --feed 127.0.0.1:31000 --orders 127.0.0.1:31002 --locates 1,2,3,4
 //                  [--latency-us 20] [--cpu 4] [--stats-json out.json]
-//   paper_exchange --source coinbase --product BTC-USD --orders 127.0.0.1:31012 --feed 127.0.0.1:31010
+//   paper_exchange --source bitstamp|coinbase --product BTC-USD --orders 127.0.0.1:31012 --feed 127.0.0.1:31010
 //                  [--taker-bp100 6000] [--maker-bp100 4000] [--latency-us 20000]
 #include <unistd.h>
 
@@ -15,6 +15,7 @@
 
 #include "lle/args.hpp"
 #include "lle/coinbase.hpp"
+#include "lle/venue.hpp"
 #include "lle/ws.hpp"
 #include "lle/itch.hpp"
 #include "lle/net.hpp"
@@ -87,18 +88,21 @@ int main(int argc, char** argv, char** envp) {
   pc.latency_ns = a.num("latency-us", 20) * 1000;
   // Nasdaq's published standard rates (approximate; tiers vary): remove $0.0030/share,
   // add earns a rebate of about $0.0020/share.
-  const bool cb = a.str("source", "itch") == "coinbase";
+  const std::string source = a.str("source", "itch");
+  const bool cb = source != "itch";  // a live crypto venue
   if (!cb) {
     pc.fees.kind = FeeModel::PerUnit;
     pc.fees.taker = a.num("taker-micros", 3000);
     pc.fees.maker = a.num("maker-micros", -2000);
   } else {
-    // Coinbase Advanced entry tier, in hundredths of a basis point. Published
-    // sources disagree (0.40%/0.60% vs 0.50%/0.90% after a Sept 2026 change), so
-    // these are flags; defaults are the lower, older schedule.
+    // Entry-tier fees, in hundredths of a basis point. Flags, because they change:
+    //  coinbase: sources disagree (0.40%/0.60% vs 0.50%/0.90% after a Sept 2026
+    //            change); default is the lower, older schedule.
+    //  bitstamp: entry tier 0.30% maker / 0.40% taker (check bitstamp.net/fee-schedule).
+    const bool bs = source == "bitstamp";
     pc.fees.kind = FeeModel::Bps;
-    pc.fees.taker = a.num("taker-bp100", 6000);
-    pc.fees.maker = a.num("maker-bp100", 4000);
+    pc.fees.taker = a.num("taker-bp100", bs ? 4000 : 6000);
+    pc.fees.maker = a.num("maker-bp100", bs ? 3000 : 4000);
     pc.qty_scale = 100'000'000;
     pc.levels_log2 = 18;
     pc.max_order_qty = 100'000'000;
@@ -109,12 +113,11 @@ int main(int argc, char** argv, char** envp) {
   std::unique_ptr<ws::Client> cbc;
   CbMirror mirror{x};
   coinbase::Stats cst;
+  std::unique_ptr<VenueFeed> vf;
   if (cb) {
     cbc = std::make_unique<ws::Client>();
-    cbc->connect("advanced-trade-ws.coinbase.com", "/");
-    const std::string product = a.str("product", "BTC-USD");
-    for (const char* ch : {"level2", "market_trades", "heartbeats"})
-      cbc->send_text("{\"type\":\"subscribe\",\"product_ids\":[\"" + product + "\"],\"channel\":\"" + ch + "\"}");
+    vf = std::make_unique<VenueFeed>(parse_venue(source), a.str("product", "BTC-USD"));
+    vf->connect(*cbc);
   }
 
   std::fprintf(stderr, "paper_exchange: feed=%s orders=%s books=%zu latency=%lldus (PAPER ONLY, no routing)\n",
@@ -128,7 +131,7 @@ int main(int argc, char** argv, char** envp) {
   while (!g_stop) {
     bool any = false;
     if (cbc && !cbc->poll([&](const unsigned char* m, std::size_t len, std::int64_t) {
-          coinbase::parse(reinterpret_cast<const char*>(m), len, mirror, cst);
+          vf->parse(m, len, mirror, cst);
           feed_pkts++;
         })) {
       std::fprintf(stderr, "paper_exchange: coinbase connection closed\n");

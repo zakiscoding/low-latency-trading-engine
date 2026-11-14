@@ -1,0 +1,13 @@
+# Local stack: tick store + telemetry. The engine itself runs on the host (pinned cores),
+# not in a container, for the clean latency runs.
+services:
+  questdb:
+    image: questdb/questdb:9.1.0
+    ports:
+      - "127.0.0.1:9000:9000"   # web console / REST (localhost only, never public)
+      - "127.0.0.1:9009:9009"   # ILP
+    volumes:
+      - questdb-data:/var/lib/questdb
+    restart: unless-stopped
+volumes:
+  questdb-data:

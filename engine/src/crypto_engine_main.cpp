@@ -1,8 +1,8 @@
-// Live engine on Coinbase's public Advanced Trade WebSocket (market data only; no
+// Live engine on a public crypto WebSocket (Bitstamp or Coinbase; market data only, no
 // account, no keys). Orders go over UDP to the local paper exchange, never to
 // Coinbase.
 //
-//   coinbase_engine --product BTC-USD --exchange 127.0.0.1:31012 [--cpu 2]
+//   crypto_engine --venue bitstamp|coinbase --product BTC-USD --exchange 127.0.0.1:31012 [--cpu 2]
 //                   [--order-qty 10000] (1e-8 BTC units) [--json out.json] [--duration-s 60]
 //
 // Stages (rdtsc): decode = socket reads + TLS decrypt, once per read; parse_apply = JSON scan + book updates (interleaved, so
@@ -23,6 +23,7 @@
 #include "lle/shm.hpp"
 #include "lle/strategy.hpp"
 #include "lle/telemetry_sink.hpp"
+#include "lle/venue.hpp"
 #include "lle/ws.hpp"
 
 using namespace lle;
@@ -123,7 +124,7 @@ int main(int argc, char** argv, char** envp) {
 
   net::Sender tx(net::parse_hostport(exch));
   net::set_nonblocking(tx.fd());
-  shm::TelemetryRing ring(a.str("shm", "/dev/shm/lle-telemetry-cb"), 16);
+  shm::TelemetryRing ring(a.str("shm", "/dev/shm/lle-telemetry-crypto"), 16);
   ShmTelemetry tel(ring, clk);
   tel.set_top_rate_hz(50);
 
@@ -139,12 +140,12 @@ int main(int argc, char** argv, char** envp) {
   rl.price_band_ticks = 10'000;  // $100
   Engine eng(tx, tel, sp, rl, clk.ticks_per_ns);
 
+  const Venue venue = parse_venue(a.str("venue", "bitstamp"));
+  VenueFeed feed(venue, product);
   ws::Client c;
-  c.connect("advanced-trade-ws.coinbase.com", "/");
-  for (const char* ch : {"level2", "market_trades", "heartbeats"})
-    c.send_text("{\"type\":\"subscribe\",\"product_ids\":[\"" + product + "\"],\"channel\":\"" + ch + "\"}");
-  std::fprintf(stderr, "coinbase_engine: %s connected, rx_timestamps=%d, orders -> %s (PAPER ONLY)\n",
-               product.c_str(), c.rx_timestamps(), exch.c_str());
+  feed.connect(c);
+  std::fprintf(stderr, "crypto_engine: %s %s connected, rx_timestamps=%d, orders -> %s (PAPER ONLY)\n",
+               venue_name(venue), product.c_str(), c.rx_timestamps(), exch.c_str());
 
   Histogram h_k2s;
   const std::uint64_t one_sec = static_cast<std::uint64_t>(clk.ticks_per_ns * 1e9);
@@ -166,7 +167,7 @@ int main(int argc, char** argv, char** envp) {
       }
       eng.t_msg = t_prev_end;
       eng.sent_this_msg = false;
-      coinbase::parse(reinterpret_cast<const char*>(m), n, eng, eng.st);
+      feed.parse(m, n, eng, eng.st);
       const std::uint64_t t1 = rdtsc();
       eng.h[cParseApply].record(t1 - t0);
       eng.after_message(t1, krx);
@@ -178,7 +179,7 @@ int main(int argc, char** argv, char** envp) {
       }
     });
     if (!ok) {
-      std::fprintf(stderr, "coinbase_engine: connection closed\n");
+      std::fprintf(stderr, "crypto_engine: connection closed\n");
       break;
     }
     // Idle-side work.
@@ -236,7 +237,7 @@ int main(int argc, char** argv, char** envp) {
                  static_cast<unsigned long long>(h_k2s.percentile(99.9)), static_cast<unsigned long long>(h_k2s.max()));
   if (!a.str("json").empty()) {
     std::ofstream f(a.str("json"));
-    f << "{\"bench\":\"coinbase_live\",\"product\":\"" << product << "\",\"cpu\":\"" << cpu_model()
+    f << "{\"bench\":\"crypto_live\",\"venue\":\"" << venue_name(venue) << "\",\"product\":\"" << product << "\",\"cpu\":\"" << cpu_model()
       << "\",\"messages\":" << eng.st.messages << ",\"updates\":" << eng.st.updates << ",\"orders\":" << eng.orders
       << ",\"stages\":{";
     for (int i = 0; i < cNum; ++i) f << (i ? "," : "") << "\"" << kCbNames[i] << "\":" << hist_json(eng.h[i], &clk);

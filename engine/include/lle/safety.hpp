@@ -27,6 +27,7 @@ inline constexpr std::string_view kAlpacaPaperBase = "https://paper-api.alpaca.m
 inline constexpr std::string_view kAllowedDataHosts[] = {
     "advanced-trade-ws.coinbase.com",  // public market data
     "ws-feed.exchange.coinbase.com",   // public market data
+    "ws.bitstamp.net",                 // public market data
     "stream.data.alpaca.markets",      // market data (needs paper keys, read only)
     "data.alpaca.markets",
     "127.0.0.1",
@@ -66,6 +67,10 @@ inline Verdict check_endpoint(std::string_view url, std::string* why = nullptr) 
     if (why) *why = "non-paper Alpaca host";
     return Verdict::Refused;
   }
+  if (ends_with(h, "bitstamp.net")) {
+    if (why) *why = "Bitstamp host that is not the public market-data feed";
+    return Verdict::Refused;
+  }
   if (ends_with(h, "coinbase.com")) {
     if (why) *why = "Coinbase host that is not a public market-data feed";
     return Verdict::Refused;
@@ -89,6 +94,8 @@ inline std::string scan_environment(char** envp) {
     if (k == "APCA_API_BASE_URL" || k == "ALPACA_BASE_URL" || k == "ALPACA_TRADING_URL") {
       if (host_of(v) != kAlpacaPaperHost) return std::string(k) + " is not the Alpaca paper endpoint";
     }
+    if (k.starts_with("BITSTAMP_API") || k.starts_with("BITSTAMP_KEY") || k.starts_with("BITSTAMP_SECRET"))
+      return std::string(k) + " is set: this project never uses Bitstamp credentials";
     if (k.starts_with("COINBASE_API") || k.starts_with("CB_ACCESS") || k == "COINBASE_KEY" || k == "COINBASE_SECRET")
       return std::string(k) + " is set: this project never uses Coinbase credentials";
   }
