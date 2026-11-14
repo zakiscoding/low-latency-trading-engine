@@ -10,6 +10,7 @@
 //   trades(venue SYMBOL, product SYMBOL, side SYMBOL, price DOUBLE, size DOUBLE, ts)
 // ts is the local receive time (kernel RX stamp when available).
 #include <arpa/inet.h>
+#include <netdb.h>
 #include <netinet/tcp.h>
 #include <sys/socket.h>
 #include <unistd.h>
@@ -34,12 +35,20 @@ class Ilp {
     const auto c = hostport.rfind(':');
     const std::string host = hostport.substr(0, c);
     const int port = std::stoi(hostport.substr(c + 1));
-    safety::require_allowed("tcp://" + host);
+    // Resolve (e.g. a compose service name), then require a private address: the
+    // tick store must never be a public endpoint.
+    addrinfo hints{}, *res = nullptr;
+    hints.ai_family = AF_INET;
+    hints.ai_socktype = SOCK_STREAM;
+    if (getaddrinfo(host.c_str(), nullptr, &hints, &res) != 0 || !res)
+      throw std::runtime_error("cannot resolve QuestDB host " + host);
+    sockaddr_in a = *reinterpret_cast<sockaddr_in*>(res->ai_addr);
+    freeaddrinfo(res);
+    char ip[INET_ADDRSTRLEN];
+    inet_ntop(AF_INET, &a.sin_addr, ip, sizeof(ip));
+    safety::require_allowed(std::string("tcp://") + ip);
     fd_ = ::socket(AF_INET, SOCK_STREAM, 0);
-    sockaddr_in a{};
-    a.sin_family = AF_INET;
     a.sin_port = htons(static_cast<std::uint16_t>(port));
-    inet_pton(AF_INET, host.c_str(), &a.sin_addr);
     if (::connect(fd_, reinterpret_cast<sockaddr*>(&a), sizeof(a)) != 0)
       throw std::runtime_error("cannot connect to QuestDB ILP at " + hostport);
     buf_.reserve(1 << 20);

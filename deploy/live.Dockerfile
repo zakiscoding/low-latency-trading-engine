@@ -10,7 +10,7 @@ WORKDIR /src
 COPY . .
 # LLE_NATIVE=OFF: the build machine (or emulator) isn't the machine it runs on.
 RUN cmake -S . -B /build -G Ninja -DCMAKE_CXX_COMPILER=g++-14 -DLLE_NATIVE=OFF -DLLE_TESTS=OFF -DLLE_URING=OFF \
- && ninja -C /build crypto_engine paper_exchange
+ && ninja -C /build crypto_engine paper_exchange recorder
 
 FROM --platform=$BUILDPLATFORM golang:1.26 AS telemetry
 ARG TARGETARCH
@@ -21,7 +21,7 @@ RUN CGO_ENABLED=0 GOARCH=$TARGETARCH go build -trimpath -ldflags "-s -w" -o /tel
 FROM ubuntu:24.04
 RUN apt-get update && apt-get install -y --no-install-recommends libssl3 ca-certificates \
  && rm -rf /var/lib/apt/lists/* && useradd -r -u 10001 lle
-COPY --from=engine /build/crypto_engine /build/paper_exchange /usr/local/bin/
+COPY --from=engine /build/crypto_engine /build/paper_exchange /build/recorder /usr/local/bin/
 COPY --from=telemetry /telemetry /usr/local/bin/telemetry
 COPY tools/live.sh /usr/local/bin/live.sh
 ENV B=/usr/local/bin TELEMETRY=/usr/local/bin/telemetry
