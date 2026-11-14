@@ -4,13 +4,18 @@
 // Execution reports go back to whoever sent the order.
 //
 //   paper_exchange --feed 127.0.0.1:31000 --orders 127.0.0.1:31002 --locates 1,2,3,4
-//                  [--latency-us 20] [--fees nasdaq] [--cpu 4] [--stats-json out.json]
+//                  [--latency-us 20] [--cpu 4] [--stats-json out.json]
+//   paper_exchange --source coinbase --product BTC-USD --orders 127.0.0.1:31012 --feed 127.0.0.1:31010
+//                  [--taker-bp100 6000] [--maker-bp100 4000] [--latency-us 20000]
 #include <unistd.h>
 
 #include <cstdio>
 #include <fstream>
+#include <memory>
 
 #include "lle/args.hpp"
+#include "lle/coinbase.hpp"
+#include "lle/ws.hpp"
 #include "lle/itch.hpp"
 #include "lle/net.hpp"
 #include "lle/paper_exchange.hpp"
@@ -36,6 +41,25 @@ void send_report(void* c, const ExecReport& r0, int inst) {
   ::sendto(ctx->fd, b, sizeof(b), MSG_DONTWAIT, reinterpret_cast<sockaddr*>(&ctx->to), sizeof(ctx->to));
   ctx->reports++;
 }
+
+// Coinbase L2/trades -> the exchange's mirror book (instrument 0).
+struct CbMirror {
+  PaperExchange& x;
+  void on_sequence(std::int64_t) {}
+  void on_l2_begin(std::string_view, bool snap) {
+    if (snap) { x.mkt_bids(0).clear(); x.mkt_asks(0).clear(); }
+  }
+  void on_l2(const coinbase::L2Update& u) { x.on_market_level(0, u.bid ? Side::Buy : Side::Sell, u.price, u.qty); }
+  void on_l2_end() {}
+  void on_trade(std::string_view, const coinbase::TradePrint& t) {
+    const auto a = x.mkt_asks(0).best_price(), b = x.mkt_bids(0).best_price();
+    const Side resting = (a != AskLadder::kNone && t.price >= a) ? Side::Sell
+                         : (b != BidLadder::kNone && t.price <= b) ? Side::Buy
+                         : (t.buy ? Side::Sell : Side::Buy);
+    x.on_market_trade(0, resting, t.price, t.qty);
+  }
+  void on_heartbeat() {}
+};
 
 std::pair<std::string, int> split(const std::string& hp) {
   const auto c = hp.rfind(':');
@@ -63,12 +87,35 @@ int main(int argc, char** argv, char** envp) {
   pc.latency_ns = a.num("latency-us", 20) * 1000;
   // Nasdaq's published standard rates (approximate; tiers vary): remove $0.0030/share,
   // add earns a rebate of about $0.0020/share.
-  pc.fees.kind = FeeModel::PerUnit;
-  pc.fees.taker = a.num("taker-micros", 3000);
-  pc.fees.maker = a.num("maker-micros", -2000);
+  const bool cb = a.str("source", "itch") == "coinbase";
+  if (!cb) {
+    pc.fees.kind = FeeModel::PerUnit;
+    pc.fees.taker = a.num("taker-micros", 3000);
+    pc.fees.maker = a.num("maker-micros", -2000);
+  } else {
+    // Coinbase Advanced entry tier, in hundredths of a basis point. Published
+    // sources disagree (0.40%/0.60% vs 0.50%/0.90% after a Sept 2026 change), so
+    // these are flags; defaults are the lower, older schedule.
+    pc.fees.kind = FeeModel::Bps;
+    pc.fees.taker = a.num("taker-bp100", 6000);
+    pc.fees.maker = a.num("maker-bp100", 4000);
+    pc.qty_scale = 100'000'000;
+    pc.levels_log2 = 18;
+    pc.max_order_qty = 100'000'000;
+  }
   Ctx ctx{ord_fd};
-  PaperExchange x(pc, static_cast<int>(locs.size()), &send_report, &ctx);
+  PaperExchange x(pc, cb ? 1 : static_cast<int>(locs.size()), &send_report, &ctx);
   ItchPaperFeed feed(x, locs);
+  std::unique_ptr<ws::Client> cbc;
+  CbMirror mirror{x};
+  coinbase::Stats cst;
+  if (cb) {
+    cbc = std::make_unique<ws::Client>();
+    cbc->connect("advanced-trade-ws.coinbase.com", "/");
+    const std::string product = a.str("product", "BTC-USD");
+    for (const char* ch : {"level2", "market_trades", "heartbeats"})
+      cbc->send_text("{\"type\":\"subscribe\",\"product_ids\":[\"" + product + "\"],\"channel\":\"" + ch + "\"}");
+  }
 
   std::fprintf(stderr, "paper_exchange: feed=%s orders=%s books=%zu latency=%lldus (PAPER ONLY, no routing)\n",
                a.str("feed", "127.0.0.1:31000").c_str(), a.str("orders", "127.0.0.1:31002").c_str(), locs.size(),
@@ -80,6 +127,13 @@ int main(int argc, char** argv, char** envp) {
   std::int64_t last_print = clock_ns(CLOCK_MONOTONIC);
   while (!g_stop) {
     bool any = false;
+    if (cbc && !cbc->poll([&](const unsigned char* m, std::size_t len, std::int64_t) {
+          coinbase::parse(reinterpret_cast<const char*>(m), len, mirror, cst);
+          feed_pkts++;
+        })) {
+      std::fprintf(stderr, "paper_exchange: coinbase connection closed\n");
+      break;
+    }
     ssize_t n = ::recv(feed_fd, buf, sizeof(buf), 0);
     if (n > 0) {
       itch::parse_mold(buf, static_cast<std::size_t>(n), feed, st);
@@ -112,8 +166,7 @@ int main(int argc, char** argv, char** envp) {
   {
     const auto& ac = x.account();
     std::fprintf(stderr, "paper_exchange final: feed_pkts=%llu orders=%llu fills=%llu (maker %llu taker %llu) "
-                         "rejects=%llu pnl=$%.2f fees=$%.2f malformed=%llu
-",
+                         "rejects=%llu pnl=$%.2f fees=$%.2f malformed=%llu\n",
                  static_cast<unsigned long long>(feed_pkts), static_cast<unsigned long long>(orders),
                  static_cast<unsigned long long>(ac.fills), static_cast<unsigned long long>(ac.maker_fills),
                  static_cast<unsigned long long>(ac.taker_fills), static_cast<unsigned long long>(ac.rejects),

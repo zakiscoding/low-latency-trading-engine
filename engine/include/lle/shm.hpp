@@ -78,6 +78,13 @@ inline void* map_file(const std::string& path, std::size_t bytes, bool create) {
   return p;
 }
 
+template <class T>
+LLE_ALWAYS_INLINE void st(T& f, T v) noexcept { __atomic_store_n(&f, v, __ATOMIC_RELAXED); }
+template <class T, class U>
+LLE_ALWAYS_INLINE void st(T& f, U v) noexcept { __atomic_store_n(&f, static_cast<T>(v), __ATOMIC_RELAXED); }
+template <class T>
+LLE_ALWAYS_INLINE T ld(const T& f) noexcept { return __atomic_load_n(&f, __ATOMIC_RELAXED); }
+
 class TelemetryRing {
  public:
   // Creates (or re-creates) the ring file. capacity_log2=16 -> 4 MiB.
@@ -108,16 +115,18 @@ class TelemetryRing {
     Record& r = recs_[i & mask_];
     r.seq.store(0, std::memory_order_relaxed);
     std::atomic_thread_fence(std::memory_order_release);
-    r.type = t;
-    r.side = side;
-    r.book = book;
-    r.u32 = u32;
-    r.a = a;
-    r.b = b;
-    r.c = c;
-    r.d = d;
-    r.e = e;
-    r.ts_ns = ts;
+    // Payload stores are relaxed atomics (plain movs on x86) so the seqlock is
+    // race-free under the C++ memory model and clean under TSan.
+    st(r.type, t);
+    st(r.side, side);
+    st(r.book, book);
+    st(r.u32, u32);
+    st(r.a, a);
+    st(r.b, b);
+    st(r.c, c);
+    st(r.d, d);
+    st(r.e, e);
+    st(r.ts_ns, ts);
     r.seq.store(i + 1, std::memory_order_release);
     head_local_ = i + 1;
     hdr_->head.store(i + 1, std::memory_order_release);
@@ -132,16 +141,16 @@ class TelemetryRing {
     const Record& r = recs_[i & mask_];
     const std::uint64_t s1 = r.seq.load(std::memory_order_acquire);
     if (s1 != i + 1) return false;
-    out.type = r.type;
-    out.side = r.side;
-    out.book = r.book;
-    out.u32 = r.u32;
-    out.a = r.a;
-    out.b = r.b;
-    out.c = r.c;
-    out.d = r.d;
-    out.e = r.e;
-    out.ts_ns = r.ts_ns;
+    out.type = ld(r.type);
+    out.side = ld(r.side);
+    out.book = ld(r.book);
+    out.u32 = ld(r.u32);
+    out.a = ld(r.a);
+    out.b = ld(r.b);
+    out.c = ld(r.c);
+    out.d = ld(r.d);
+    out.e = ld(r.e);
+    out.ts_ns = ld(r.ts_ns);
     std::atomic_thread_fence(std::memory_order_acquire);
     return r.seq.load(std::memory_order_relaxed) == s1;
   }
